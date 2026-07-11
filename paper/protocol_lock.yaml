@@ -1,0 +1,236 @@
+status: final_clean_regeneration
+purpose: >
+  Freeze the complete clean-regeneration protocol before producing any final
+  edge, assignment, or rolling result. Development choices use only the
+  development assignment pool; final reporting uses three held-out pools.
+
+randomization:
+  master_seed: 20260704
+  derivation: numpy_SeedSequence_with_fixed_domain_and_index_spawn_keys
+  independent_namespaces:
+    - edge_map
+    - edge_pair
+    - assignment_map
+    - assignment_point
+    - rolling_map
+    - rolling_mission
+  invariant_to_worker_count: true
+
+profiles:
+  fast:
+    beta: 150
+    dataset: outputs/final_ras/edges_beta150
+    model: outputs/final_ras/models/beta150_specialist
+  balanced:
+    beta: 650
+    dataset: outputs/final_ras/edges_beta650
+    model: outputs/final_ras/models/beta650_specialist
+  safe:
+    beta: 1500
+    dataset: outputs/final_ras/edges_beta1500
+    model: outputs/final_ras/models/beta1500_specialist
+
+direct_bid_ablation:
+  purpose: quantify the scalar-bid accuracy cost of retaining semantic length-risk outputs
+  profiles: [150, 650, 1500]
+  training:
+    data_and_split: identical_to_corresponding_semantic_specialist
+    architecture: identical_backbone_and_hidden_dimension
+    target: bid_equals_length_plus_beta_times_risk
+    target_mode: residual
+    loss: mae
+    seed: 0
+  comparisons:
+    - edge_bid_fidelity
+    - scalar_sum_assignment_regret
+  interpretation: semantic_outputs_need_not_beat_direct_bid_but_should_avoid_large_degradation
+
+edge_data:
+  seed_namespace:
+    map_and_pair_streams_are_independent: true
+    keys: [split, distribution, shard]
+    purpose: disjoint from assignment and rolling namespaces
+  split:
+    train: 16000
+    val: 2000
+    test: 2000
+    map_disjoint: true
+    maps:
+      train: 1600
+      val: 200
+      test: 200
+    edges_per_map: 10
+    split_map_overlap:
+      train_val: 0
+      train_test: 0
+      val_test: 0
+  mix:
+    natural_random: 12000
+    hard_random: 5000
+    hard_crossing: 3000
+    per_split_distribution_preserved: true
+  point_sampling:
+    natural_sampler: shared_uniform_valid_point
+    boundary_margin: 0.0
+    minimum_euclidean_distance: 120.0
+  profile_geometry:
+    beta150_beta650_beta1500_share_same_map_and_start_goal_edges: true
+    shared_edge_geometries: 20000
+  near_edge_policy:
+    euclidean_distance_le_24: zero_cost
+    euclidean_distance_24_to_120: true_planner_outcome
+    euclidean_distance_gt_120: learned_or_baseline_prediction
+
+fleet_pools:
+  instances_per_pool: 500
+  development_pool:
+    name: development
+    map_seed: 3497905177
+    point_seed: 311630984
+  final_test_pools:
+    - {name: test_1, map_seed: 1163249018, point_seed: 3551392992}
+    - {name: test_2, map_seed: 894443083, point_seed: 1566606784}
+    - {name: test_3, map_seed: 4235594248, point_seed: 2168153799}
+  isolation_check:
+    method: exact_map_content_fingerprint
+    development_pool_overlap_with_edge_dataset: 0
+    final_test_pool_overlap_with_edge_dataset: 0
+    rolling_pool_overlap_with_edge_dataset: 0
+  instance_generation:
+    map_distribution: natural_random
+    point_sampler: shared_uniform_valid_point
+    boundary_margin: 0.0
+    minimum_euclidean_distance: 0.0
+    map_assignment: one_unique_scenario_per_instance
+    reachability: reference_planner_succeeds_for_every_uav_task_pair
+    global_free_space_connectivity_assumed: false
+
+scale_assignment_protocol:
+  role: primary simultaneous-assignment scale evaluation
+  matrix_size: 10x10
+  profiles: [150, 650, 1500]
+  pools: [development, test_1, test_2, test_3]
+  instances_per_pool: 50
+  map_selection: first_50_predeclared_maps_from_each_locked_pool
+  point_seed_namespace: scale_assignment_point
+  profile_geometry: all_profiles_share_maps_uavs_tasks_and_pair_keys
+  development_use: protocol_and_operating_point_only
+  final_reporting: test_1_to_test_3
+  total_instances: 200
+  total_candidate_edges_per_profile: 20000
+  total_planner_outcomes: 60000
+  optimizer: scipy_milp_with_highs
+  mip_relative_gap: 1.0e-8
+  time_limit_seconds_per_solve: 60
+  consumers: [sum_length, makespan]
+  budget_levels: [0.25, 0.50, 0.75]
+  budget_definition: R_min_plus_level_times_R_unconstrained_minus_R_min
+  learned_risk_buffer: q75_edge_validation_residual
+  learned_quality_scope: paired_common_nonviolating_proposals
+
+budget_protocol:
+  quantiles: [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90]
+  definition: >
+    For each fleet instance, enumerate all assignment/profile combinations
+    using true planner outcomes for fast, balanced, and safe profiles. The
+    risk budget B_q is the q-quantile of their true total additive risks.
+  changes_after_development_pool: forbidden
+
+learned_single_profile_protocol:
+  selection_pool: development
+  rule: >
+    For each budget quantile, compare fast-only, balanced-only, and safe-only
+    proposals on the development instances where all three predictors are
+    predicted feasible. Select the profile with the lowest mean true proposal
+    regret without fallback and without filtering true violations. The same
+    procedure is also aggregated across quantiles for a globally fixed policy.
+  budget_conditioned_locked_profile_by_quantile:
+    "0.10": fast
+    "0.20": fast
+    "0.30": fast
+    "0.40": fast
+    "0.50": fast
+    "0.60": fast
+    "0.70": fast
+    "0.80": fast
+    "0.90": fast
+  locked_profile: fast
+  interpretation: budget-conditioned and globally fixed selectors coincide in this experiment
+
+risk_buffer_protocol:
+  residual: true_risk_minus_predicted_risk
+  buffer: max(0, quantile(validation_residual, q))
+  calibration_source: edge_validation_split
+  by_profile: true
+  sweep: [raw, q50, q75, q90, q95]
+  main_operating_point: q75
+  operating_point_selection_pool: development
+  main_operating_point_status: empirical_calibration_point
+  formal_safety_guarantee: false
+
+required_evidence_chain:
+  - planner_matrix_construction_is_expensive
+  - profile_outcomes_are_non_degenerate
+  - exact_outcomes_show_value_over_fixed_profile
+  - learned_portfolio_preserves_oracle_representation_value
+  - semantic_length_risk_outputs_preserve_most_direct_scalar_bid_utility
+  - risk_buffer_frontier_reports_efficiency_coverage_compliance
+  - repeated_dispatch_drop_in_integration_reduces_candidate_planning_workload
+
+rolling_dispatch_scope:
+  role: repeated_dispatch_drop_in_integration_study
+  not_claiming:
+    - new_dynamic_scheduler
+    - online_competitive_policy
+    - dynamic_obstacle_planner
+    - mission_wide_risk_budget_dynamic_program
+  minimal_setup:
+    uavs: 5
+    tasks_per_mission: 20
+    tasks_per_wave: 5
+    arrival_interval: 5.0
+    scenario_protocol: one_distinct_natural_map_per_mission
+    test_map_seed: 1293520839
+    test_mission_seed: 3450876602
+    total_test_missions: 100
+    test_scenario_ids: 0-99
+    execution: serial
+    scenario_pool: outputs/final_ras/scenario_pools/rolling_test
+    selected_minimum_mean_route_survival: 0.50
+    selection_rule: fixed_before_the_final_rolling_run_as_an_external_consumer_parameter
+    risk_budget_per_route: 0.6931471805599453
+    risk_buffer_quantile: 0.75
+    state_update: selected_true_planner_route_endpoint
+    selected_route_execution: exact_planner_execution
+    proposal_policy: execute_as_selected_and_report_prediction_infeasibility_and_true_budget_violation
+    repair_policy: none
+  providers:
+    exhaustive_online_multi_profile:
+      candidate_planner_call_estimate_per_event: candidate_edges_x_profiles
+    learned_semantic_portfolio:
+      candidate_prediction: batched_profile_conditioned_cnn
+      selected_execution_planner_calls_per_event: selected_edges
+    fast_only:
+      candidate_prediction: fast_profile_only
+      selected_execution_planner_calls_per_event: selected_edges
+    balanced_only:
+      candidate_prediction: balanced_profile_only
+      selected_execution_planner_calls_per_event: selected_edges
+    safe_only:
+      candidate_prediction: safe_profile_only
+      selected_execution_planner_calls_per_event: selected_edges
+  primary_metrics:
+    - completed_tasks
+    - mission_true_length
+    - mission_true_risk
+    - flow_time
+    - near_candidate_planner_calls
+    - proposal_verification_planner_calls
+    - total_planner_calls
+    - exhaustive_candidate_planner_call_estimate
+    - planner_call_reduction_vs_exhaustive
+    - executed_violation_events
+    - planner_cpu_seconds
+    - cumulative_true_route_length
+    - cumulative_true_risk
+    - risk_violation_rate

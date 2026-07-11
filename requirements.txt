@@ -1,0 +1,5 @@
+numpy
+matplotlib
+pandas
+torch
+scipy>=1.9

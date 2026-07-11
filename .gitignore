@@ -1,0 +1,46 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Experiment artifacts
+outputs/
+runs/
+wandb/
+mlruns/
+
+# Large generated data/model artifacts
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pkl
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+tmp/
+
+# Local indexes and generated paper builds
+.codegraph/
+paper/latex/output/
+paper/ras_reference_examples/
+paper/submission/package_ras/
+
+# Local reference papers and public-release staging
+public_release/
