@@ -642,8 +642,6 @@ def summary_stages(
                 str(main_results / "profile_commitment" / "rolling_summary"),
                 "--static-runtime-dir",
                 str(main_results / "static_runtime"),
-                "--risk-summary-dir",
-                str(static_summary_dir),
                 "--output-dir",
                 str(figures_dir),
             ],
@@ -652,9 +650,10 @@ def summary_stages(
                 for name in (
                     "fig2_commitment_example.png",
                     "fig3_commitment_evidence.png",
-                    "fig4_runtime_accounting.png",
-                    "fig5_rolling_stress.png",
-                    "figB1_risk_buffer_frontier.png",
+                    "fig4_portability.png",
+                    "fig5_acquisition_economics.png",
+                    "fig6_rolling_stress.png",
+                    "figB1_operating_regimes.png",
                 )
             ),
         )

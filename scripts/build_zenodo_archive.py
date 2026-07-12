@@ -133,6 +133,11 @@ def data_entries() -> list[ArchiveEntry]:
             OUTPUT_ROOT / "assignment_scale" / "10x10", Path("assignment_10x10")
         )
     )
+    entries.extend(
+        benchmark_entries(
+            OUTPUT_ROOT / "assignment_scale" / "20x20", Path("assignment_20x20")
+        )
+    )
     entries.extend(tree_entries(OUTPUT_ROOT / "scenario_pools", Path("scenario_pools")))
 
     grid = ROOT / "outputs" / "planner_transfer" / "grid12"
@@ -263,13 +268,13 @@ def public_code_commit() -> str:
 def archive_readme() -> str:
     return """# Planner-Outcome Interface Data, Models, and Results
 
-This record accompanies *Learning a Profile-Conditioned Planner-Outcome
-Interface for Risk-Budgeted Multi-UAV Assignment*.
+This record accompanies *A Learned Planner-Outcome Interface for Deferred
+Profile Commitment in Risk-Budgeted Multi-UAV Assignment*.
 
 ## Files
 
-- `planner_outcome_data_v1.zip`: map-disjoint edge supervision, canonical 5x5
-  and 10x10 assignment benchmarks, grid-planner replication data, and the
+- `planner_outcome_data_v1.zip`: map-disjoint edge supervision, canonical 5x5,
+  10x10, and 20x20 assignment benchmarks, grid-planner replication data, and the
   locked experiment protocol.
 - `planner_outcome_models_v1.zip`: the main shared profile-conditioned model
   and the specialist, capacity, and direct-bid models used in the paper.
@@ -290,8 +295,8 @@ included.
 ## Restoring the expected layout
 
 Extract each ZIP into the same directory. The resulting top-level directories
-are `edges`, `assignment_5x5`, `assignment_10x10`, `grid_planner`, `models`,
-`results`, `scenario_pools`, and `protocol`.
+are `edges`, `assignment_5x5`, `assignment_10x10`, `assignment_20x20`,
+`grid_planner`, `models`, `results`, `scenario_pools`, and `protocol`.
 
 Integrity can be checked with any SHA-256 utility against `SHA256SUMS.txt`.
 """
@@ -381,6 +386,9 @@ def semantic_validation(release: Path) -> dict[str, object]:
             "assignment_10x10_test1_pairs": csv_rows(
                 archive, "assignment_10x10/test_1/fast/pairs.csv"
             ),
+            "assignment_20x20_test1_pairs": csv_rows(
+                archive, "assignment_20x20/test_1/fast/pairs.csv"
+            ),
             "grid_test1_pairs": csv_rows(
                 archive, "grid_planner/test_1/fast/pairs.csv"
             ),
@@ -391,6 +399,7 @@ def semantic_validation(release: Path) -> dict[str, object]:
         "edges_safe": 20_000,
         "assignment_5x5_test1_pairs": 12_500,
         "assignment_10x10_test1_pairs": 5_000,
+        "assignment_20x20_test1_pairs": 4_000,
         "grid_test1_pairs": 1_250,
     }
     if row_counts != expected_counts:
@@ -417,6 +426,7 @@ def semantic_validation(release: Path) -> dict[str, object]:
     result_members = {
         "results/shared_h192/profile_commitment/summary/learned_commitment_paired.csv",
         "results/shared_h192/scale_10x10/summary/scale_assignment_pooled_summary.csv",
+        "results/shared_h192/scale_20x20/summary/scale_assignment_pooled_summary.csv",
         "results/shared_h192/rolling/lazy_rolling_missions.csv",
         "results/shared_h192/static_runtime/static_runtime_serial_results.csv",
         "results/grid_planner/summary/grid_transfer_commitment_summary.csv",

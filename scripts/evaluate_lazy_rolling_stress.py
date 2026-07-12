@@ -678,7 +678,10 @@ def predict_event_candidates(
                 base_image_cache=base_image_cache,
             )
             frame.loc[far_mask, "pred_length"] = np.maximum(0.0, predictions["length"].astype(float))
-            frame.loc[far_mask, "pred_risk"] = np.maximum(0.0, predictions["risk"].astype(float)) + buffers[mode]
+            frame.loc[far_mask, "pred_risk"] = np.maximum(
+                0.0,
+                predictions["risk"].astype(float) + buffers[mode],
+            )
         rows_by_mode[mode] = frame
 
     candidates = []

@@ -107,18 +107,25 @@ fleet_pools:
 
 scale_assignment_protocol:
   role: primary simultaneous-assignment scale evaluation
-  matrix_size: 10x10
   profiles: [150, 650, 1500]
   pools: [development, test_1, test_2, test_3]
-  instances_per_pool: 50
-  map_selection: first_50_predeclared_maps_from_each_locked_pool
+  scales:
+    - matrix_size: 10x10
+      instances_per_pool: 50
+      map_selection: first_50_predeclared_maps_from_each_locked_pool
+      total_instances: 200
+      total_candidate_edges_per_profile: 20000
+      total_planner_outcomes: 60000
+    - matrix_size: 20x20
+      instances_per_pool: 10
+      map_selection: first_10_predeclared_maps_from_each_locked_pool
+      total_instances: 40
+      total_candidate_edges_per_profile: 16000
+      total_planner_outcomes: 48000
   point_seed_namespace: scale_assignment_point
   profile_geometry: all_profiles_share_maps_uavs_tasks_and_pair_keys
   development_use: protocol_and_operating_point_only
   final_reporting: test_1_to_test_3
-  total_instances: 200
-  total_candidate_edges_per_profile: 20000
-  total_planner_outcomes: 60000
   optimizer: scipy_milp_with_highs
   mip_relative_gap: 1.0e-8
   time_limit_seconds_per_solve: 60
@@ -160,6 +167,7 @@ learned_single_profile_protocol:
 risk_buffer_protocol:
   residual: true_risk_minus_predicted_risk
   buffer: max(0, quantile(validation_residual, q))
+  allocator_exposure: max(0, predicted_risk + buffer)
   calibration_source: edge_validation_split
   by_profile: true
   sweep: [raw, q50, q75, q90, q95]

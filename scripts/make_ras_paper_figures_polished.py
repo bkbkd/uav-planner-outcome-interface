@@ -13,8 +13,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.data.dataset_generator import DatasetConfig, ThreatConfig, random_scenario, sample_start_goal_with_mode
-from src.planners.lattice_planner import DeterministicLatticePlanner, LatticePlannerConfig
+from matplotlib.lines import Line2D
+
+from src.data.dataset_generator import PlannerConfig, run_planner
+from src.learning.features import scenario_from_metadata
 
 
 PROFILE_COLORS = {"fast": "#d95f02", "balanced": "#1b9e77", "safe": "#386cb0"}
@@ -28,23 +30,53 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate the current RAS manuscript figures from frozen results.")
     parser.add_argument("--commitment-summary-dir", type=Path, required=True)
     parser.add_argument("--rolling-commitment-dir", type=Path, required=True)
+    parser.add_argument(
+        "--rolling-exact-dir",
+        type=Path,
+        default=Path("outputs/final_ras/results/shared_h192/rolling_exact_reference"),
+    )
     parser.add_argument("--static-runtime-dir", type=Path, required=True)
-    parser.add_argument("--risk-summary-dir", type=Path, required=True)
+    parser.add_argument(
+        "--grid-transfer-summary",
+        type=Path,
+        default=Path("outputs/planner_transfer/grid12/summary/grid_transfer_commitment_summary.csv"),
+    )
+    parser.add_argument(
+        "--scale-10-dir",
+        type=Path,
+        default=Path("outputs/final_ras/results/shared_h192/scale_10x10/evaluation"),
+    )
+    parser.add_argument(
+        "--scale-20-dir",
+        type=Path,
+        default=Path("outputs/final_ras/results/shared_h192/scale_20x20/evaluation"),
+    )
+    parser.add_argument(
+        "--development-benchmark-dir",
+        type=Path,
+        default=Path("outputs/final_ras/assignment/development/beta650/merged"),
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("paper/figures/ras_interface"))
-    parser.add_argument("--route-seed", type=int, default=17)
-    parser.add_argument("--route-samples", type=int, default=60)
-    parser.add_argument("--make-route-profile-example", action="store_true")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     set_style()
-    make_commitment_example(args.commitment_summary_dir, args.output_dir)
+    make_commitment_example(
+        args.commitment_summary_dir,
+        args.development_benchmark_dir,
+        args.output_dir,
+    )
     make_commitment_evidence(args.commitment_summary_dir, args.output_dir)
+    make_operating_regime_appendix(args.commitment_summary_dir, args.output_dir)
+    make_portability(
+        args.commitment_summary_dir,
+        args.grid_transfer_summary,
+        args.scale_10_dir,
+        args.scale_20_dir,
+        args.output_dir,
+    )
     make_runtime_accounting(args.static_runtime_dir, args.output_dir)
-    make_rolling_stress(args.rolling_commitment_dir, args.output_dir)
-    make_risk_buffer_frontier(args.risk_summary_dir, args.output_dir)
-    if args.make_route_profile_example:
-        make_route_profiles(args.output_dir, seed=args.route_seed, samples=args.route_samples)
+    make_rolling_stress(args.rolling_commitment_dir, args.rolling_exact_dir, args.output_dir)
     print(f"saved figures to: {args.output_dir}")
 
 
@@ -81,39 +113,211 @@ def save(fig: plt.Figure, output_dir: Path, name: str) -> None:
     plt.close(fig)
 
 
-def make_commitment_example(summary_dir: Path, output_dir: Path) -> None:
-    example = json.loads((summary_dir / "fleet_example.json").read_text(encoding="utf-8"))
-    methods = ["fast_only", "balanced_only", "safe_only", "portfolio"]
-    portfolio_modes = example["methods"]["portfolio"]["modes"].split(";")
-    mode_counts = {name: portfolio_modes.count(name) for name in ("fast", "balanced", "safe")}
-    composition = " + ".join(f"{count} {name}" for name, count in mode_counts.items() if count)
-    labels = ["uniform fast", "uniform balanced", "uniform safe", f"edge-wise\n{composition}"]
-    colors = [PROFILE_COLORS["fast"], PROFILE_COLORS["balanced"], PROFILE_COLORS["safe"], EDGE_COLOR]
-    markers = ["o", "o", "o", "D"]
-
-    fig, ax = plt.subplots(figsize=(5.1, 3.55))
-    for method, label, color, marker in zip(methods, labels, colors, markers):
-        row = example["methods"][method]
-        ax.scatter(row["risk"], row["length"], s=58, marker=marker, color=color, edgecolor="white", linewidth=0.7, zorder=3)
-        offset = (6, 5) if method != "safe_only" else (6, -13)
-        ax.annotate(label, (row["risk"], row["length"]), xytext=offset, textcoords="offset points", color=color, fontsize=7.5)
-    budget = float(example["risk_budget"])
-    ax.axvline(budget, color="#111827", linestyle="--", linewidth=1.2, label=f"budget B={budget:.4f}")
-    ax.annotate(
-        "41.98 m",
-        xy=(example["methods"]["portfolio"]["risk"], example["methods"]["portfolio"]["length"]),
-        xytext=(example["methods"]["safe_only"]["risk"] - 0.004, example["methods"]["safe_only"]["length"] - 18),
-        arrowprops={"arrowstyle": "->", "color": EDGE_COLOR, "linewidth": 1.0},
-        color=EDGE_COLOR,
-        ha="right",
-        fontsize=8.0,
+def bootstrap_mean_ci(
+    values: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    resamples: int = 5000,
+) -> tuple[float, float, float]:
+    if len(values) == 0:
+        raise ValueError("Cannot bootstrap an empty sample")
+    boot = np.mean(rng.choice(values, size=(resamples, len(values)), replace=True), axis=1)
+    return (
+        float(np.mean(values)),
+        float(np.quantile(boot, 0.025)),
+        float(np.quantile(boot, 0.975)),
     )
-    ax.set_xlabel("total exposure")
-    ax.set_ylabel("total route length (m)")
-    ax.set_title("One dispatch: uniform versus edge-wise profile commitment")
-    ax.legend(frameon=False, loc="upper left")
-    fig.tight_layout()
+
+
+def make_commitment_example(
+    summary_dir: Path,
+    benchmark_dir: Path,
+    output_dir: Path,
+) -> None:
+    example = json.loads((summary_dir / "fleet_example.json").read_text(encoding="utf-8"))
+    instance_id = int(example["instance_id"])
+    instances = pd.read_csv(benchmark_dir / "instances.csv")
+    instance = instances[instances["instance_id"].astype(int) == instance_id]
+    if len(instance) != 1:
+        raise ValueError(f"Expected one development instance {instance_id}, found {len(instance)}")
+    instance = instance.iloc[0]
+    agents = np.asarray(json.loads(instance["agents_json"]), dtype=float)
+    tasks = np.asarray(json.loads(instance["tasks_json"]), dtype=float)
+
+    profile_dirs = {
+        "fast": benchmark_dir.parents[1] / "beta150",
+        "balanced": benchmark_dir,
+        "safe": benchmark_dir.parents[1] / "beta1500",
+    }
+    metadata = {
+        profile: json.loads((path / "source_metadata.json").read_text(encoding="utf-8"))
+        for profile, path in profile_dirs.items()
+    }
+    scenario = scenario_from_metadata(metadata["balanced"], int(instance["scenario_id"]))
+    routes = load_or_build_fleet_example_routes(
+        summary_dir,
+        example,
+        scenario,
+        agents,
+        tasks,
+        metadata,
+    )
+
+    methods = ("global_profile", "portfolio")
+    titles = ("Hindsight best uniform profile", "Edge-wise profile commitment")
+    fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.55), sharex=True, sharey=True)
+    image = None
+    for ax, method, title in zip(axes, methods, titles):
+        row = example["methods"][method]
+        modes = row["modes"].split(";")
+        ax.grid(False)
+        image = scenario.threat_field.plot(ax=ax, cmap="YlOrRd", alpha=0.58)
+        scenario.obstacle_map.plot(
+            ax=ax,
+            facecolor="#374151",
+            edgecolor="white",
+            alpha=0.9,
+        )
+        for agent_index, mode in enumerate(modes):
+            path = routes[f"{method}_{agent_index}"]
+            ax.plot(
+                path[:, 0],
+                path[:, 1],
+                color="white",
+                linewidth=3.6,
+                alpha=0.85,
+                zorder=3,
+            )
+            ax.plot(
+                path[:, 0],
+                path[:, 1],
+                color=PROFILE_COLORS[mode],
+                linewidth=2.25,
+                zorder=4,
+            )
+        draw_fleet_endpoints(ax, agents, tasks)
+        ax.set_title(title, fontweight="bold", pad=7)
+        ax.text(
+            0.02,
+            0.02,
+            f"L = {float(row['length']):.1f} m\n"
+            f"R = {float(row['risk']):.4f} / B = {float(example['risk_budget']):.4f}\n"
+            f"profiles: {format_mode_mix(modes)}",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=7.4,
+            bbox={"facecolor": "white", "edgecolor": "#475569", "alpha": 0.86, "pad": 3.0},
+            zorder=8,
+        )
+        ax.set_xlabel("x (m)")
+    axes[0].set_ylabel("y (m)")
+    gain = float(example["mixing_gain"])
+    fig.suptitle(
+        f"Same dispatch, matching, and exposure budget: mixed profiles save {gain:.2f} m",
+        fontsize=10.0,
+        fontweight="bold",
+        y=0.995,
+    )
+    handles = [
+        Line2D([0], [0], color=PROFILE_COLORS["fast"], lw=2.5, label="fast route"),
+        Line2D([0], [0], color=PROFILE_COLORS["safe"], lw=2.5, label="safe route"),
+        Line2D([0], [0], marker="o", color="none", markerfacecolor="#111827", markeredgecolor="white", label="UAV"),
+        Line2D([0], [0], marker="*", color="none", markerfacecolor="white", markeredgecolor="#111827", markersize=8, label="task"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.46, -0.005))
+    if image is not None:
+        colorbar_axis = fig.add_axes([0.92, 0.18, 0.014, 0.62])
+        colorbar_axis.grid(False)
+        colorbar = fig.colorbar(image, cax=colorbar_axis)
+        colorbar.set_label("threat exposure rate")
+    fig.subplots_adjust(left=0.065, right=0.91, bottom=0.13, top=0.89, wspace=0.08)
     save(fig, output_dir, "fig2_commitment_example")
+
+
+def load_or_build_fleet_example_routes(
+    summary_dir: Path,
+    example: dict[str, object],
+    scenario: object,
+    agents: np.ndarray,
+    tasks: np.ndarray,
+    metadata: dict[str, dict[str, object]],
+) -> dict[str, np.ndarray]:
+    cache_path = summary_dir / "fleet_example_routes.npz"
+    if cache_path.exists():
+        with np.load(cache_path) as cached:
+            return {key: cached[key].copy() for key in cached.files}
+
+    route_cache: dict[tuple[int, int, str], tuple[np.ndarray, float, float]] = {}
+    routes: dict[str, np.ndarray] = {}
+    for method in ("global_profile", "portfolio"):
+        row = example["methods"][method]
+        assignment = parse_assignment(row["assignment"])
+        modes = row["modes"].split(";")
+        total_length = 0.0
+        total_risk = 0.0
+        for agent_index, (task_index, mode) in enumerate(zip(assignment, modes)):
+            key = (agent_index, task_index, mode)
+            if key not in route_cache:
+                planner_config = PlannerConfig(**metadata[mode]["config"]["planner"])
+                start = tuple(float(value) for value in agents[agent_index, :3])
+                goal = tuple(float(value) for value in tasks[task_index, :2])
+                result, _ = run_planner(scenario, start, goal, planner_config)
+                if result is None:
+                    raise RuntimeError(f"Failed to reconstruct route {key}")
+                route_cache[key] = (
+                    result.path.astype(np.float32),
+                    float(result.metrics["length"]),
+                    float(result.metrics["risk"]),
+                )
+            path, length, risk = route_cache[key]
+            routes[f"{method}_{agent_index}"] = path
+            total_length += length
+            total_risk += risk
+        if not np.isclose(total_length, float(row["length"]), atol=1e-6):
+            raise RuntimeError(f"{method} reconstructed length {total_length} != frozen {row['length']}")
+        if not np.isclose(total_risk, float(row["risk"]), atol=1e-9):
+            raise RuntimeError(f"{method} reconstructed risk {total_risk} != frozen {row['risk']}")
+    np.savez_compressed(cache_path, **routes)
+    return routes
+
+
+def parse_assignment(value: str) -> list[int]:
+    pairs = [item.split("->") for item in str(value).split(";") if item]
+    ordered = sorted((int(agent), int(task)) for agent, task in pairs)
+    return [task for _, task in ordered]
+
+
+def format_mode_mix(modes: list[str]) -> str:
+    counts = {mode: modes.count(mode) for mode in ("fast", "balanced", "safe")}
+    return " + ".join(f"{count} {mode}" for mode, count in counts.items() if count)
+
+
+def draw_fleet_endpoints(ax: plt.Axes, agents: np.ndarray, tasks: np.ndarray) -> None:
+    ax.scatter(
+        agents[:, 0],
+        agents[:, 1],
+        marker="o",
+        s=34,
+        c="#111827",
+        edgecolors="white",
+        linewidths=0.8,
+        zorder=6,
+    )
+    ax.scatter(
+        tasks[:, 0],
+        tasks[:, 1],
+        marker="*",
+        s=72,
+        c="white",
+        edgecolors="#111827",
+        linewidths=0.8,
+        zorder=6,
+    )
+    for index, (x, y, _) in enumerate(agents):
+        ax.annotate(f"U{index + 1}", (x, y), xytext=(4, 4), textcoords="offset points", fontsize=6.4, fontweight="bold", zorder=7)
+    for index, (x, y) in enumerate(tasks):
+        ax.annotate(f"T{index + 1}", (x, y), xytext=(4, -8), textcoords="offset points", fontsize=6.4, fontweight="bold", zorder=7)
 
 
 def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
@@ -124,13 +328,13 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
         (learned["reference_method"] == "dispatch_global_learned")
         & (learned["scope"] == "common_true_nonviolating")
     ].sort_values("budget_quantile")
-    regimes = pd.read_csv(summary_dir / "operating_regime_joint_summary.csv")
-    regimes = regimes[regimes["budget_quantile"].isin([0.1, 0.5, 0.9])]
+    regimes = pd.read_csv(summary_dir / "operating_regime_instances.csv")
+    regimes = regimes[
+        (regimes["pool"] != "development")
+        & (regimes["budget_quantile"].isin([0.1, 0.5, 0.9]))
+    ]
 
-    fig = plt.figure(figsize=(10.0, 6.15))
-    grid = fig.add_gridspec(2, 6, height_ratios=[0.88, 1.12], hspace=0.38, wspace=0.42)
-    exact_ax = fig.add_subplot(grid[0, :3])
-    learned_ax = fig.add_subplot(grid[0, 3:])
+    fig, (exact_ax, learned_ax, regime_ax) = plt.subplots(1, 3, figsize=(10.4, 3.25))
     q = exact["budget_quantile"].to_numpy(float)
     exact_ax.plot(q, exact["gain_to_k3_mean"], marker="o", color=EXACT_COLOR)
     exact_ax.axhline(0, color="#475569", linewidth=0.9)
@@ -149,14 +353,71 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
     learned_ax.set_ylabel("edge-wise gain (m)")
     learned_ax.set_title("(b) Learned outcomes, same predictions")
 
+    budgets = np.asarray([0.1, 0.5, 0.9])
+    x = np.arange(len(budgets), dtype=float)
+    regime_specs = (
+        ("low disagreement + low utilization", "low", "low", GLOBAL_COLOR, "o", -0.07),
+        ("high disagreement + high utilization", "high", "high", EDGE_COLOR, "s", 0.07),
+    )
+    rng = np.random.default_rng(20260712)
+    for label, disagreement, utilization, color, marker, offset in regime_specs:
+        means = []
+        lows = []
+        highs = []
+        counts = []
+        for budget in budgets:
+            values = regimes[
+                np.isclose(regimes["budget_quantile"], budget)
+                & (regimes["assignment_disagreement_bin"] == disagreement)
+                & (regimes["budget_utilization_bin"] == utilization)
+            ]["mixing_gain"].to_numpy(float)
+            if len(values) == 0:
+                raise ValueError(f"No held-out operating-regime samples for q={budget}, {label}")
+            sample_mean, sample_low, sample_high = bootstrap_mean_ci(values, rng)
+            means.append(sample_mean)
+            lows.append(sample_low)
+            highs.append(sample_high)
+            counts.append(len(values))
+        means_array = np.asarray(means)
+        yerr = np.vstack((means_array - np.asarray(lows), np.asarray(highs) - means_array))
+        regime_ax.errorbar(
+            x + offset,
+            means_array,
+            yerr=yerr,
+            color=color,
+            marker=marker,
+            capsize=2.5,
+            label=label,
+        )
+        for xpos, value, count in zip(x + offset, means_array, counts):
+            regime_ax.annotate(
+                f"$n={count}$",
+                (xpos, value),
+                xytext=(0, 7),
+                textcoords="offset points",
+                ha="center",
+                fontsize=6.5,
+                color=color,
+            )
+    regime_ax.axhline(0, color="#475569", linewidth=0.9)
+    regime_ax.set_xticks(x, ["tight\n$q=0.1$", "medium\n$q=0.5$", "loose\n$q=0.9$"])
+    regime_ax.set_ylabel("edge-wise gain (m)")
+    regime_ax.set_title("(c) When finer commitment matters")
+    regime_ax.legend(loc="upper right", frameon=False, fontsize=6.5)
+
+    fig.subplots_adjust(left=0.065, right=0.99, bottom=0.2, top=0.9, wspace=0.34)
+    save(fig, output_dir, "fig3_commitment_evidence")
+
+
+def make_operating_regime_appendix(summary_dir: Path, output_dir: Path) -> None:
+    regimes = pd.read_csv(summary_dir / "operating_regime_joint_summary.csv")
+    regimes = regimes[regimes["budget_quantile"].isin([0.1, 0.5, 0.9])]
     bin_order_x = ["low", "medium", "high"]
     bin_order_y = ["high", "medium", "low"]
-    heat_axes = []
-    heat_image = None
     vmax = float(regimes["mixing_gain_mean"].max())
-    for index, budget in enumerate((0.1, 0.5, 0.9)):
-        ax = fig.add_subplot(grid[1, 2 * index : 2 * index + 2])
-        heat_axes.append(ax)
+    fig, axes = plt.subplots(1, 3, figsize=(9.5, 2.75))
+    heat_image = None
+    for index, (ax, budget) in enumerate(zip(axes, (0.1, 0.5, 0.9))):
         subset = regimes[np.isclose(regimes["budget_quantile"], budget)].set_index(
             ["budget_utilization_bin", "assignment_disagreement_bin"]
         )
@@ -179,14 +440,146 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
         ax.set_xlabel("assignment disagreement")
         if index == 0:
             ax.set_ylabel("budget utilization")
-        ax.set_title(f"({chr(ord('c') + index)}) Reference-outcome regimes, $q={budget:.1f}$")
+        ax.set_title(f"({chr(ord('a') + index)}) $q={budget:.1f}$")
     assert heat_image is not None
-    colorbar_axis = fig.add_axes([0.945, 0.105, 0.012, 0.335])
+    colorbar_axis = fig.add_axes([0.925, 0.2, 0.014, 0.63])
     colorbar_axis.grid(False)
     colorbar = fig.colorbar(heat_image, cax=colorbar_axis)
     colorbar.set_label("mean edge-wise gain (m)")
-    fig.subplots_adjust(left=0.07, right=0.925, bottom=0.09, top=0.95)
-    save(fig, output_dir, "fig3_commitment_evidence")
+    fig.subplots_adjust(left=0.075, right=0.9, bottom=0.22, top=0.86, wspace=0.22)
+    save(fig, output_dir, "figB1_operating_regimes")
+
+
+def make_portability(
+    commitment_summary_dir: Path,
+    grid_summary_path: Path,
+    scale_10_dir: Path,
+    scale_20_dir: Path,
+    output_dir: Path,
+) -> None:
+    rng = np.random.default_rng(20260712)
+    lattice = load_lattice_exact_gains(commitment_summary_dir)
+    grid = pd.read_csv(grid_summary_path).sort_values("budget_quantile")
+
+    fig, (planner_ax, scale_ax) = plt.subplots(1, 2, figsize=(9.6, 3.45))
+    lattice_summary = []
+    for budget, subset in lattice.groupby("budget_quantile", sort=True):
+        mean, low, high = bootstrap_mean_ci(subset["gain"].to_numpy(float), rng)
+        lattice_summary.append((float(budget), mean, low, high))
+    lattice_summary = np.asarray(lattice_summary, dtype=float)
+    planner_ax.plot(
+        lattice_summary[:, 0],
+        lattice_summary[:, 1],
+        marker="o",
+        color=EXACT_COLOR,
+        label="nonholonomic lattice planner",
+    )
+    planner_ax.fill_between(
+        lattice_summary[:, 0],
+        lattice_summary[:, 2],
+        lattice_summary[:, 3],
+        color=EXACT_COLOR,
+        alpha=0.13,
+        linewidth=0,
+    )
+    planner_ax.plot(
+        grid["budget_quantile"],
+        grid["edge_wise_gain_mean"],
+        marker="s",
+        color="#0f766e",
+        label="holonomic grid planner",
+    )
+    planner_ax.fill_between(
+        grid["budget_quantile"].to_numpy(float),
+        grid["edge_wise_gain_ci95_low"].to_numpy(float),
+        grid["edge_wise_gain_ci95_high"].to_numpy(float),
+        color="#0f766e",
+        alpha=0.13,
+        linewidth=0,
+    )
+    planner_ax.axhline(0, color="#475569", linewidth=0.9)
+    planner_ax.set_xlabel("budget quantile")
+    planner_ax.set_ylabel("edge-wise gain (m)")
+    planner_ax.set_title("(a) Different route-generation structures")
+    planner_ax.legend(frameon=False, loc="upper right")
+
+    scale_frames = {
+        "5$\\times$5\n75 outcomes\n$n=1{,}500$": scale_gain_frame(lattice, 5, {0.1: "tight", 0.5: "medium", 0.9: "loose"}),
+        "10$\\times$10\n300 outcomes\n$n=150$": scale_gain_frame(load_scale_exact_gains(scale_10_dir), 10, {0.25: "tight", 0.5: "medium", 0.75: "loose"}),
+        "20$\\times$20\n1,200 outcomes\n$n=30$": scale_gain_frame(load_scale_exact_gains(scale_20_dir), 20, {0.25: "tight", 0.5: "medium", 0.75: "loose"}),
+    }
+    scale_x = np.arange(len(scale_frames), dtype=float)
+    level_specs = (
+        ("tight", "#7c3aed", "o", -0.16),
+        ("medium", "#2563eb", "s", 0.0),
+        ("loose", "#0f766e", "^", 0.16),
+    )
+    for level, color, marker, offset in level_specs:
+        means = []
+        lows = []
+        highs = []
+        for frame in scale_frames.values():
+            values = frame.loc[frame["level"] == level, "gain_per_route"].to_numpy(float)
+            mean, low, high = bootstrap_mean_ci(values, rng)
+            means.append(mean)
+            lows.append(low)
+            highs.append(high)
+        means_array = np.asarray(means)
+        scale_ax.errorbar(
+            scale_x + offset,
+            means_array,
+            yerr=np.vstack((means_array - np.asarray(lows), np.asarray(highs) - means_array)),
+            color=color,
+            marker=marker,
+            linestyle="none",
+            capsize=2.8,
+            label=level,
+        )
+    scale_ax.axhline(0, color="#475569", linewidth=0.9)
+    scale_ax.set_xticks(scale_x, list(scale_frames))
+    scale_ax.set_ylabel("gain per selected route (m)")
+    scale_ax.set_title("(b) Larger candidate matrices")
+    scale_ax.legend(frameon=False, ncol=3, loc="upper right")
+
+    fig.subplots_adjust(left=0.075, right=0.99, bottom=0.25, top=0.9, wspace=0.28)
+    save(fig, output_dir, "fig4_portability")
+
+
+def load_lattice_exact_gains(summary_dir: Path) -> pd.DataFrame:
+    rows = []
+    exact_dir = summary_dir.parent / "exact"
+    for pool in ("test_1", "test_2", "test_3"):
+        results = pd.read_csv(exact_dir / pool / "budget_assignment_results.csv")
+        selected = results[results["method"].isin(["portfolio", "global_profile"])].copy()
+        pivot = selected.pivot(index=["instance_id", "budget_quantile"], columns="method", values="selected_length")
+        gains = (pivot["global_profile"] - pivot["portfolio"]).rename("gain").reset_index()
+        gains["pool"] = pool
+        rows.append(gains)
+    return pd.concat(rows, ignore_index=True)
+
+
+def load_scale_exact_gains(evaluation_dir: Path) -> pd.DataFrame:
+    rows = []
+    for pool in ("test_1", "test_2", "test_3"):
+        results = pd.read_csv(evaluation_dir / pool / "scale_assignment_results.csv")
+        selected = results[
+            (results["consumer"] == "sum_length")
+            & (results["acquisition"] == "exact")
+            & (results["commitment"].isin(["edge_wise", "dispatch_global"]))
+        ].copy()
+        pivot = selected.pivot(index=["instance_id", "budget_level"], columns="commitment", values="true_sum_length")
+        gains = (pivot["dispatch_global"] - pivot["edge_wise"]).rename("gain").reset_index()
+        gains["pool"] = pool
+        rows.append(gains)
+    return pd.concat(rows, ignore_index=True)
+
+
+def scale_gain_frame(gains: pd.DataFrame, selected_routes: int, levels: dict[float, str]) -> pd.DataFrame:
+    budget_column = "budget_quantile" if "budget_quantile" in gains.columns else "budget_level"
+    selected = gains[gains[budget_column].isin(levels)].copy()
+    selected["level"] = selected[budget_column].map(levels)
+    selected["gain_per_route"] = selected["gain"] / float(selected_routes)
+    return selected
 
 
 def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
@@ -224,134 +617,85 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
         arrowprops={"arrowstyle": "->", "color": EDGE_COLOR, "linewidth": 0.9},
     )
     fig.tight_layout()
-    save(fig, output_dir, "fig4_runtime_accounting")
+    save(fig, output_dir, "fig5_acquisition_economics")
 
 
-def make_rolling_stress(rolling_dir: Path, output_dir: Path) -> None:
+def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) -> None:
     population = pd.read_csv(rolling_dir / "rolling_commitment_population.csv").set_index("method")
-    paired = pd.read_csv(rolling_dir / "rolling_commitment_paired.csv").set_index("comparison")
-    modes = pd.read_csv(rolling_dir / "rolling_commitment_modes.csv").set_index("method")
-    order = ["exact_portfolio", "fast_only", "dispatch_global", "learned_portfolio"]
-    labels = ["planner-acquired\nedge-wise", "fixed\nfast", "learned\nglobal", "learned\nedge-wise"]
-    colors = [EXACT_COLOR, PROFILE_COLORS["fast"], GLOBAL_COLOR, EDGE_COLOR]
+    exact_missions = pd.read_csv(exact_dir / "lazy_rolling_missions.csv").query("method == 'exact_portfolio'")
+    learned_missions = pd.read_csv(
+        rolling_dir.parent.parent / "rolling" / "lazy_rolling_missions.csv"
+    ).query("method == 'learned_portfolio'")
+    missions = pd.concat([exact_missions, learned_missions], ignore_index=True)
+    order = ["exact_portfolio", "learned_portfolio", "fast_only"]
+    labels = ["planner-acquired\nedge-wise", "learned\nedge-wise", "fixed\nfast"]
+    colors = [EXACT_COLOR, EDGE_COLOR, PROFILE_COLORS["fast"]]
     rows = population.loc[order]
 
-    fig, axes = plt.subplots(2, 2, figsize=(9.3, 5.8))
-    axes = axes.ravel()
-    complete = axes[0].bar(labels, rows["completed_tasks_mean"], color=colors, width=0.68)
-    axes[0].set_ylim(0, 20.5)
-    axes[0].set_ylabel("completed tasks / mission")
-    axes[0].set_title("(a) Task completion")
-    axes[0].bar_label(complete, labels=[f"{v:.2f}" for v in rows["completed_tasks_mean"]], padding=2, fontsize=7.4)
+    fig, axes = plt.subplots(1, 3, figsize=(10.4, 3.35))
+    complete_values = rows["completion_rate_mean"].to_numpy(float) * 100.0
+    method_x = np.arange(len(labels), dtype=float)
+    axes[0].scatter(method_x, complete_values, color=colors, s=54, zorder=3)
+    axes[0].set_ylim(85, 101)
+    axes[0].set_xticks(method_x, labels)
+    axes[0].set_ylabel("completed tasks (%)")
+    axes[0].set_title("(a) Mission completion")
+    for xpos, value, color in zip(method_x, complete_values, colors):
+        axes[0].annotate(
+            f"{value + 1e-9:.1f}%",
+            (xpos, value),
+            xytext=(0, 7),
+            textcoords="offset points",
+            ha="center",
+            fontsize=7.4,
+            color=color,
+        )
 
-    comparisons = ["learned_portfolio_vs_dispatch_global", "learned_portfolio_vs_fast_only"]
-    comp_labels = ["vs learned global", "vs fixed fast"]
-    means = paired.loc[comparisons, "gain_mean"].to_numpy(float)
-    low = paired.loc[comparisons, "gain_ci95_low"].to_numpy(float)
-    high = paired.loc[comparisons, "gain_ci95_high"].to_numpy(float)
-    axes[1].bar(np.arange(2), means, yerr=np.vstack([means - low, high - means]), capsize=4, color=[GLOBAL_COLOR, PROFILE_COLORS["fast"]], width=0.58)
-    axes[1].axhline(0, color="#334155", linewidth=1.0)
-    axes[1].set_xticks(np.arange(2), comp_labels)
-    axes[1].set_ylabel("learned edge-wise gain (m)")
-    axes[1].set_title("(b) Common-complete quality")
+    call_values = rows["total_planner_calls_mean"].to_numpy(float)
+    calls = axes[1].bar(labels, call_values, color=colors, width=0.68)
+    axes[1].set_ylabel("planner calls / mission")
+    axes[1].set_title("(b) Planner workload")
+    axes[1].bar_label(calls, labels=[f"{value:.1f}" for value in call_values], padding=2, fontsize=7.4)
 
-    calls = axes[2].bar(labels, rows["total_planner_calls_mean"], color=colors, width=0.68)
-    axes[2].set_ylabel("planner calls / mission")
-    axes[2].set_title("(c) Actual planner workload")
-    axes[2].bar_label(calls, labels=[f"{v:.1f}" for v in rows["total_planner_calls_mean"]], padding=2, fontsize=7.4)
+    paired = missions.pivot(
+        index="mission_id",
+        columns="method",
+        values=["completed_tasks", "mission_true_length"],
+    )
+    common_complete = (
+        (paired["completed_tasks"]["exact_portfolio"] == 20)
+        & (paired["completed_tasks"]["learned_portfolio"] == 20)
+    )
+    exact_length = paired["mission_true_length"]["exact_portfolio"][common_complete].to_numpy(float)
+    learned_length = paired["mission_true_length"]["learned_portfolio"][common_complete].to_numpy(float)
+    if len(exact_length) != 94:
+        raise ValueError(f"Expected 94 common-complete rolling missions, found {len(exact_length)}")
+    axes[2].scatter(exact_length, learned_length, s=18, color=EDGE_COLOR, alpha=0.68, edgecolors="none")
+    lower = float(min(np.min(exact_length), np.min(learned_length)))
+    upper = float(max(np.max(exact_length), np.max(learned_length)))
+    margin = 0.035 * (upper - lower)
+    axes[2].plot([lower - margin, upper + margin], [lower - margin, upper + margin], color="#475569", linestyle="--", linewidth=1.0, label="identity")
+    axes[2].set_xlim(lower - margin, upper + margin)
+    axes[2].set_ylim(lower - margin, upper + margin)
+    axes[2].set_aspect("equal", adjustable="box")
+    axes[2].set_xlabel("planner-acquired mission length (m)")
+    axes[2].set_ylabel("learned mission length (m)")
+    axes[2].set_title("(c) Closed-loop acquisition fidelity")
+    mard = float(np.mean(np.abs(learned_length - exact_length) / exact_length) * 100.0)
+    axes[2].text(
+        0.04,
+        0.96,
+        f"common-complete: $n={len(exact_length)}$\nMARD = {mard:.2f}%",
+        transform=axes[2].transAxes,
+        ha="left",
+        va="top",
+        fontsize=7.2,
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.82, "pad": 2.0},
+    )
+    axes[2].legend(frameon=False, loc="lower right")
 
-    mix_methods = ["exact_portfolio", "dispatch_global", "learned_portfolio"]
-    mix_labels = ["planner-acquired edge-wise", "learned global", "learned edge-wise"]
-    y = np.arange(3)
-    left = np.zeros(3)
-    for profile in ("fast", "balanced", "safe"):
-        values = modes.loc[mix_methods, f"{profile}_rate"].to_numpy(float)
-        axes[3].barh(y, values, left=left, color=PROFILE_COLORS[profile], hatch=PROFILE_HATCHES[profile], edgecolor="white", label=profile)
-        left += values
-    axes[3].set_yticks(y, mix_labels)
-    axes[3].set_xlim(0, 1)
-    axes[3].set_xlabel("executed route share")
-    axes[3].set_title("(d) Executed profile mix")
-    axes[3].legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.16))
-    fig.tight_layout()
-    save(fig, output_dir, "fig5_rolling_stress")
-
-
-def make_risk_buffer_frontier(summary_dir: Path, output_dir: Path) -> None:
-    df = pd.read_csv(summary_dir / "risk_buffer_sensitivity.csv")
-    q50 = df[np.isclose(df["budget_quantile"], 0.5)].copy()
-    order = ["raw", "q50", "q75", "q90", "q95"]
-    q50["buffer"] = pd.Categorical(q50["buffer"], order, ordered=True)
-    q50 = q50.sort_values("buffer")
-    fig, axes = plt.subplots(1, 2, figsize=(8.8, 3.35))
-    axes[0].plot(q50["true_violation_rate"] * 100, q50["true_length_mean"], marker="o", color=EDGE_COLOR)
-    for row in q50.itertuples(index=False):
-        axes[0].annotate(str(row.buffer), (row.true_violation_rate * 100, row.true_length_mean), xytext=(4, 3), textcoords="offset points")
-    axes[0].set_xlabel("true violation rate (%)")
-    axes[0].set_ylabel("proposal true length (m)")
-    axes[0].set_title("(a) Empirical exposure-buffer frontier")
-    axes[1].bar(q50["buffer"].astype(str), q50["predicted_feasible_rate"] * 100, color="#64748b")
-    axes[1].set_ylim(0, 105)
-    axes[1].set_ylabel("predicted feasible rate (%)")
-    axes[1].set_title("(b) Proposal coverage")
-    fig.tight_layout()
-    save(fig, output_dir, "figB1_risk_buffer_frontier")
-
-
-def make_route_profiles(output_dir: Path, *, seed: int, samples: int) -> None:
-    scenario, start, goal, results = find_route_profile_example(seed=seed, samples=samples)
-    fig, ax = plt.subplots(figsize=(5.8, 5.35))
-    image = scenario.threat_field.plot(ax=ax, cmap="inferno", alpha=0.82)
-    ax.grid(False)
-    scenario.obstacle_map.plot(ax=ax, facecolor="#111827", edgecolor="white", alpha=0.86)
-    ax.plot([start[0], goal[0]], [start[1], goal[1]], color="#e5e7eb", lw=1.25, ls="--", label="straight")
-    ax.scatter([start[0]], [start[1]], s=58, color="#22c55e", edgecolor="black", linewidth=0.75, zorder=8)
-    ax.scatter([goal[0]], [goal[1]], s=82, color="#38bdf8", marker="*", edgecolor="black", linewidth=0.75, zorder=8)
-    ax.annotate("start", (start[0], start[1]), xytext=(5, 4), textcoords="offset points", fontsize=7.4, color="white")
-    ax.annotate("goal", (goal[0], goal[1]), xytext=(5, 5), textcoords="offset points", fontsize=7.4, color="white")
-    metric_rows = []
-    for name, result in results:
-        metric_rows.append(f"{name:8s}  L={result.metrics['length']:.0f},  R={result.metrics['risk']:.3f}")
-        ax.plot(result.path[:, 0], result.path[:, 1], color=PROFILE_COLORS[name], lw=1.65, label=name)
-    ax.set_xlim(0, scenario.width)
-    ax.set_ylim(0, scenario.height)
-    ax.set_aspect("equal")
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.legend(loc="upper left", ncol=4, frameon=True, framealpha=0.72, fontsize=6.7)
-    ax.text(0.035, 0.035, "\n".join(metric_rows), transform=ax.transAxes, ha="left", va="bottom", fontsize=6.5, family="monospace", bbox={"facecolor": "white", "edgecolor": "#475569", "linewidth": 0.55, "alpha": 0.78, "pad": 2.6})
-    cbar = fig.colorbar(image, ax=ax, shrink=0.65, pad=0.023, aspect=34)
-    cbar.set_label("threat rate", fontsize=8.3)
-    fig.tight_layout()
-    save(fig, output_dir, "fig6_route_profiles")
-
-
-def find_route_profile_example(*, seed: int, samples: int):
-    config = DatasetConfig(n_samples=samples, n_scenarios=1, start_goal_mode="mixed", mixed_barrier_crossing_prob=0.7, map_seed=seed, sample_seed=seed + 1, threat=ThreatConfig(layout="central_barrier"))
-    rng = np.random.default_rng(seed)
-    scenario = random_scenario(scenario_id=0, rng=rng, map_config=config.map, threat_config=config.threat, obstacle_config=config.obstacles)
-    best = None
-    for _ in range(samples):
-        sample_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
-        start, goal, _ = sample_start_goal_with_mode(scenario, rng=sample_rng, mode=config.start_goal_mode, mixed_barrier_crossing_prob=config.mixed_barrier_crossing_prob, min_distance=config.min_start_goal_distance, max_tries=config.max_sample_tries)
-        results = []
-        for name, beta in (("fast", 150.0), ("balanced", 650.0), ("safe", 1500.0)):
-            result = DeterministicLatticePlanner(scenario, LatticePlannerConfig(beta=beta, grid_guidance_risk_weight=beta)).plan(start, goal)
-            if result is None:
-                results = []
-                break
-            results.append((name, result))
-        if len(results) != 3:
-            continue
-        lengths = np.asarray([result.metrics["length"] for _, result in results])
-        risks = np.asarray([result.metrics["risk"] for _, result in results])
-        score = float(np.ptp(lengths) + 500.0 * np.ptp(risks))
-        if best is None or score > best[0]:
-            best = (score, start, goal, results)
-    if best is None:
-        raise RuntimeError("Could not find a successful route-profile example.")
-    _, start, goal, results = best
-    return scenario, start, goal, results
+    fig.subplots_adjust(left=0.065, right=0.99, bottom=0.2, top=0.89, wspace=0.34)
+    save(fig, output_dir, "fig6_rolling_stress")
 
 
 if __name__ == "__main__":

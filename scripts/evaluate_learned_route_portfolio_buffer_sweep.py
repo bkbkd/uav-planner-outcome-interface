@@ -180,7 +180,9 @@ def load_mode_base_predictions(
     )
     base_pairs = pairs.copy()
     base_pairs["pred_length_base"] = np.maximum(0.0, predictions["length"].astype(float))
-    base_pairs["pred_risk_base"] = np.maximum(0.0, predictions["risk"].astype(float))
+    # Preserve the raw prediction so every sweep point applies the same
+    # deployed rule as the main evaluation: max(0, risk_hat + buffer).
+    base_pairs["pred_risk_base"] = predictions["risk"].astype(float)
     base_pairs["true_length"] = base_pairs["length"].astype(float)
     base_pairs["true_risk"] = base_pairs["risk"].astype(float)
     return {

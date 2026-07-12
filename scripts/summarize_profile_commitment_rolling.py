@@ -10,7 +10,14 @@ import numpy as np
 import pandas as pd
 
 
-METHODS = ("exact_portfolio", "learned_portfolio", "dispatch_global", "fast_only")
+METHODS = (
+    "exact_portfolio",
+    "learned_portfolio",
+    "dispatch_global",
+    "fast_only",
+    "balanced_only",
+    "safe_only",
+)
 
 
 def main() -> None:
@@ -55,7 +62,9 @@ def main() -> None:
 
 def combine_missions(learned_dir: Path, global_dir: Path, exact_dir: Path) -> pd.DataFrame:
     frames = [
-        pd.read_csv(learned_dir / "lazy_rolling_missions.csv").query("method in ['learned_portfolio', 'fast_only']"),
+        pd.read_csv(learned_dir / "lazy_rolling_missions.csv").query(
+            "method in ['learned_portfolio', 'fast_only', 'balanced_only', 'safe_only']"
+        ),
         pd.read_csv(global_dir / "lazy_rolling_missions.csv").query("method == 'dispatch_global'"),
         pd.read_csv(exact_dir / "lazy_rolling_missions.csv").query("method == 'exact_portfolio'"),
     ]
@@ -64,7 +73,9 @@ def combine_missions(learned_dir: Path, global_dir: Path, exact_dir: Path) -> pd
 
 def combine_events(learned_dir: Path, global_dir: Path, exact_dir: Path) -> pd.DataFrame:
     frames = [
-        pd.read_csv(learned_dir / "lazy_rolling_events.csv").query("method in ['learned_portfolio', 'fast_only']"),
+        pd.read_csv(learned_dir / "lazy_rolling_events.csv").query(
+            "method in ['learned_portfolio', 'fast_only', 'balanced_only', 'safe_only']"
+        ),
         pd.read_csv(global_dir / "lazy_rolling_events.csv").query("method == 'dispatch_global'"),
         pd.read_csv(exact_dir / "lazy_rolling_events.csv").query("method == 'exact_portfolio'"),
     ]
@@ -110,7 +121,13 @@ def paired_summary(
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for survival, group in missions.groupby("minimum_mean_route_survival", sort=True):
-        for reference in ("dispatch_global", "fast_only", "exact_portfolio"):
+        for reference in (
+            "dispatch_global",
+            "fast_only",
+            "exact_portfolio",
+            "balanced_only",
+            "safe_only",
+        ):
             values = paired_gain_values(group, "learned_portfolio", reference)
             rows.append(
                 {

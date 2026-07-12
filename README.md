@@ -9,7 +9,7 @@ route regime in advance.
 
 The repository accompanies the manuscript:
 
-> *Learning a Profile-Conditioned Planner-Outcome Interface for
+> *A Learned Planner-Outcome Interface for Deferred Profile Commitment in
 > Risk-Budgeted Multi-UAV Assignment*
 
 ## What Is Included
@@ -19,7 +19,7 @@ The repository accompanies the manuscript:
 - generation of map-disjoint edge datasets and fleet assignment benchmarks;
 - shared and specialist planner-outcome predictors;
 - deployment-fixed, dispatch-global, and edge-wise profile commitment;
-- exact finite evaluation for 5x5 assignment and MILP evaluation for 10x10;
+- exact finite evaluation for 5x5 assignment and MILP evaluation for 10x10 and 20x20;
 - static runtime accounting, rolling dispatch, statistical summaries, and figures.
 
 The authoritative experiment protocol is
