@@ -1,24 +1,25 @@
-# Planner-Outcome Interfaces for Risk-Budgeted Multi-UAV Assignment
+# Route-Profile Selection for Risk-Budgeted Multi-UAV Assignment
 
-This repository implements the experiments for a profile-conditioned
-planner--allocator interface. A frozen route planner supplies route length and
-additive exposure outcomes under several planning profiles. A shared predictor
-amortizes those planner queries so that a fleet allocator can retain profile
-choice until allocation instead of committing every candidate edge to one
-route regime in advance.
+This repository contains the experiments for studying when a multi-UAV system
+should choose among planner-generated route profiles. A frozen route planner
+supplies route length and additive exposure under several profiles. The
+experiments compare a profile fixed during development, one profile selected
+for each dispatch, and profiles selected per edge during allocation. A shared
+predictor avoids planning every candidate under every profile, while the
+planner still generates all routes selected for execution.
 
 The repository accompanies the manuscript:
 
-> *A Learned Planner-Outcome Interface for Deferred Profile Commitment in
-> Risk-Budgeted Multi-UAV Assignment*
+> *Delaying Route-Profile Selection in Risk-Budgeted Multi-UAV Assignment with
+> a Learned Planner Interface*
 
 ## What Is Included
 
 - a deterministic SE(2) state-lattice planner used by the primary learned system;
-- a structurally distinct grid risk planner used for mechanism replication;
+- a structurally distinct grid risk planner used to repeat the profile-selection comparison;
 - generation of map-disjoint edge datasets and fleet assignment benchmarks;
-- shared and specialist planner-outcome predictors;
-- deployment-fixed, dispatch-global, and edge-wise profile commitment;
+- shared and profile-specific route-outcome predictors;
+- fixed, dispatch-wide, and per-edge profile selection;
 - exact finite evaluation for 5x5 assignment and MILP evaluation for 10x10 and 20x20;
 - static runtime accounting, rolling dispatch, statistical summaries, and figures.
 
@@ -98,7 +99,7 @@ python scripts/train_profile_onehot_cnn.py --help
 python scripts/run_sharded_assignment_benchmark.py --help
 python scripts/replan_assignment_benchmark_profile.py --help
 
-# Evaluate commitment and learned acquisition
+# Evaluate profile selection with predicted outcomes
 python scripts/evaluate_route_portfolio_budget.py --help
 python scripts/evaluate_learned_route_portfolio_budget.py --help
 python scripts/evaluate_scale_assignment_milp.py --help
@@ -125,7 +126,7 @@ For assignment benchmarks, the near-edge policy is:
 
 Exposure is additive along a route. The associated survival proxy is
 `survival = exp(-exposure)`, so selected route exposures can be composed by the
-risk-budgeted consumers evaluated in the paper.
+profile-selection rules evaluated in the paper.
 
 ## Repository Layout
 

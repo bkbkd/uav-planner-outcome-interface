@@ -164,7 +164,7 @@ def make_commitment_example(
     )
 
     methods = ("global_profile", "portfolio")
-    titles = ("Hindsight best uniform profile", "Edge-wise profile commitment")
+    titles = ("Hindsight best uniform profile", "Per-edge profile selection")
     fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.55), sharex=True, sharey=True)
     image = None
     for ax, method, title in zip(axes, methods, titles):
@@ -339,8 +339,8 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
     exact_ax.plot(q, exact["gain_to_k3_mean"], marker="o", color=EXACT_COLOR)
     exact_ax.axhline(0, color="#475569", linewidth=0.9)
     exact_ax.set_xlabel("budget quantile")
-    exact_ax.set_ylabel("edge-wise gain (m)")
-    exact_ax.set_title("(a) Reference-outcome commitment value")
+    exact_ax.set_ylabel("per-edge gain (m)")
+    exact_ax.set_title("(a) Planner-generated outcomes")
 
     ql = learned["budget_quantile"].to_numpy(float)
     mean = learned["gain_mean"].to_numpy(float)
@@ -350,8 +350,8 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
     learned_ax.fill_between(ql, lo, hi, color=EDGE_COLOR, alpha=0.15, linewidth=0)
     learned_ax.axhline(0, color="#475569", linewidth=0.9)
     learned_ax.set_xlabel("budget quantile")
-    learned_ax.set_ylabel("edge-wise gain (m)")
-    learned_ax.set_title("(b) Learned outcomes, same predictions")
+    learned_ax.set_ylabel("per-edge gain (m)")
+    learned_ax.set_title("(b) Predicted outcomes, same predictions")
 
     budgets = np.asarray([0.1, 0.5, 0.9])
     x = np.arange(len(budgets), dtype=float)
@@ -401,8 +401,8 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
             )
     regime_ax.axhline(0, color="#475569", linewidth=0.9)
     regime_ax.set_xticks(x, ["tight\n$q=0.1$", "medium\n$q=0.5$", "loose\n$q=0.9$"])
-    regime_ax.set_ylabel("edge-wise gain (m)")
-    regime_ax.set_title("(c) When finer commitment matters")
+    regime_ax.set_ylabel("per-edge gain (m)")
+    regime_ax.set_title("(c) When per-edge selection matters")
     regime_ax.legend(loc="upper right", frameon=False, fontsize=6.5)
 
     fig.subplots_adjust(left=0.065, right=0.99, bottom=0.2, top=0.9, wspace=0.34)
@@ -445,7 +445,7 @@ def make_operating_regime_appendix(summary_dir: Path, output_dir: Path) -> None:
     colorbar_axis = fig.add_axes([0.925, 0.2, 0.014, 0.63])
     colorbar_axis.grid(False)
     colorbar = fig.colorbar(heat_image, cax=colorbar_axis)
-    colorbar.set_label("mean edge-wise gain (m)")
+    colorbar.set_label("mean per-edge gain (m)")
     fig.subplots_adjust(left=0.075, right=0.9, bottom=0.22, top=0.86, wspace=0.22)
     save(fig, output_dir, "figB1_operating_regimes")
 
@@ -499,8 +499,8 @@ def make_portability(
     )
     planner_ax.axhline(0, color="#475569", linewidth=0.9)
     planner_ax.set_xlabel("budget quantile")
-    planner_ax.set_ylabel("edge-wise gain (m)")
-    planner_ax.set_title("(a) Different route-generation structures")
+    planner_ax.set_ylabel("per-edge gain (m)")
+    planner_ax.set_title("(a) Different planners")
     planner_ax.legend(frameon=False, loc="upper right")
 
     scale_frames = {
@@ -538,7 +538,7 @@ def make_portability(
     scale_ax.axhline(0, color="#475569", linewidth=0.9)
     scale_ax.set_xticks(scale_x, list(scale_frames))
     scale_ax.set_ylabel("gain per selected route (m)")
-    scale_ax.set_title("(b) Larger candidate matrices")
+    scale_ax.set_title("(b) Larger assignments")
     scale_ax.legend(frameon=False, ncol=3, loc="upper right")
 
     fig.subplots_adjust(left=0.075, right=0.99, bottom=0.25, top=0.9, wspace=0.28)
@@ -586,14 +586,14 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     summary = pd.read_csv(static_runtime_dir / "static_runtime_serial_summary.csv")
     q50 = summary[np.isclose(summary["budget_quantile"], 0.5)].set_index("method")
     methods = ["exact_portfolio", "fast_only", "dispatch_global", "learned_portfolio"]
-    labels = ["planner-acquired\nedge-wise", "fixed\nfast", "learned\nglobal", "learned\nedge-wise"]
+    labels = ["plan all\ncandidates", "fixed\nfast", "predict,\none profile", "predict,\nper edge"]
     colors = [EXACT_COLOR, PROFILE_COLORS["fast"], GLOBAL_COLOR, EDGE_COLOR]
     ordered = q50.loc[methods]
 
     fig, axes = plt.subplots(1, 2, figsize=(8.8, 3.35))
     calls = axes[0].bar(labels, ordered["total_planner_calls_mean"], color=colors, width=0.68)
     axes[0].set_ylabel("measured planner calls")
-    axes[0].set_title("(a) Candidate and selected-route planning")
+    axes[0].set_title("(a) Planner calls")
     axes[0].bar_label(calls, labels=[f"{v:.1f}" for v in ordered["total_planner_calls_mean"]], padding=2, fontsize=7.6)
 
     means = ordered["decision_wall_time_sec_mean"].to_numpy(float)
@@ -608,7 +608,7 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     axes[1].set_title("(b) End-to-end dispatch timing")
     axes[1].bar_label(times, labels=[f"{v:.1f}" for v in means], padding=2, fontsize=7.6)
     axes[1].annotate(
-        "same predicted library\n+9 ms allocator solve time",
+        "same predictions\n+9 ms allocator time",
         xy=(3, q50.loc["learned_portfolio", "decision_wall_time_sec_mean"]),
         xytext=(2.45, 56),
         ha="center",
@@ -628,7 +628,7 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     ).query("method == 'learned_portfolio'")
     missions = pd.concat([exact_missions, learned_missions], ignore_index=True)
     order = ["exact_portfolio", "learned_portfolio", "fast_only"]
-    labels = ["planner-acquired\nedge-wise", "learned\nedge-wise", "fixed\nfast"]
+    labels = ["plan all\ncandidates", "predict,\nper edge", "fixed\nfast"]
     colors = [EXACT_COLOR, EDGE_COLOR, PROFILE_COLORS["fast"]]
     rows = population.loc[order]
 
@@ -678,14 +678,14 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     axes[2].set_xlim(lower - margin, upper + margin)
     axes[2].set_ylim(lower - margin, upper + margin)
     axes[2].set_aspect("equal", adjustable="box")
-    axes[2].set_xlabel("planner-acquired mission length (m)")
-    axes[2].set_ylabel("learned mission length (m)")
-    axes[2].set_title("(c) Closed-loop acquisition fidelity")
+    axes[2].set_xlabel("mission length with planned candidates (m)")
+    axes[2].set_ylabel("mission length with predicted candidates (m)")
+    axes[2].set_title("(c) Predicted vs planned mission length")
     mard = float(np.mean(np.abs(learned_length - exact_length) / exact_length) * 100.0)
     axes[2].text(
         0.04,
         0.96,
-        f"common-complete: $n={len(exact_length)}$\nMARD = {mard:.2f}%",
+        f"completed by both: $n={len(exact_length)}$\nMARD = {mard:.2f}%",
         transform=axes[2].transAxes,
         ha="left",
         va="top",

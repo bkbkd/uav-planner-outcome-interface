@@ -266,10 +266,10 @@ def public_code_commit() -> str:
 
 
 def archive_readme() -> str:
-    return """# Planner-Outcome Interface Data, Models, and Results
+    return """# Route-Profile Selection Data, Models, and Results
 
-This record accompanies *A Learned Planner-Outcome Interface for Deferred
-Profile Commitment in Risk-Budgeted Multi-UAV Assignment*.
+This record accompanies *Delaying Route-Profile Selection in Risk-Budgeted
+Multi-UAV Assignment with a Learned Planner Interface*.
 
 ## Files
 
@@ -315,23 +315,36 @@ The separately hosted source code is licensed under the MIT License.
 
 def zenodo_metadata_draft() -> dict[str, object]:
     return {
-        "status": "draft-creators-pending",
-        "title": "Planner-Outcome Interface Data, Models, and Results for Risk-Budgeted Multi-UAV Assignment",
+        "status": "draft-ready",
+        "title": "Route-Profile Selection Data, Models, and Results for Risk-Budgeted Multi-UAV Assignment",
         "resource_type": "dataset",
-        "publication_date": "2026-07-11",
-        "creators": [],
+        "publication_date": "2026-07-14",
+        "creators": [
+            {
+                "name": "Xu, Zhouning",
+                "affiliation": "National Elite Institute of Engineering, Northwestern Polytechnical University",
+            },
+            {
+                "name": "Wu, Qiupeng",
+                "affiliation": "National Elite Institute of Engineering, Northwestern Polytechnical University",
+            },
+            {
+                "name": "Chen, Bolin",
+                "affiliation": "School of Computer Science, Northwestern Polytechnical University",
+            },
+        ],
         "description": (
             "Map-disjoint planner supervision, fleet assignment benchmarks, trained models, "
-            "and final results accompanying a profile-conditioned planner-outcome interface "
-            "for risk-budgeted multi-UAV assignment."
+            "and final results accompanying a study of when route profiles should be selected "
+            "in risk-budgeted multi-UAV assignment."
         ),
         "license": "cc-by-4.0",
         "keywords": [
             "multi-robot task allocation",
             "multi-UAV assignment",
             "risk-aware planning",
-            "planner surrogate",
-            "planner-outcome interface",
+            "route-profile selection",
+            "learned planner interface",
         ],
         "related_identifiers": [
             {
