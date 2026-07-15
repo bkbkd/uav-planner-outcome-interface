@@ -271,6 +271,8 @@ def archive_readme() -> str:
 This record accompanies *Delaying Route-Profile Selection in Risk-Budgeted
 Multi-UAV Assignment with a Learned Planner Interface*.
 
+Persistent identifier: https://doi.org/10.5281/zenodo.21357325
+
 ## Files
 
 - `planner_outcome_data_v1.zip`: map-disjoint edge supervision, canonical 5x5,
@@ -315,10 +317,11 @@ The separately hosted source code is licensed under the MIT License.
 
 def zenodo_metadata_draft() -> dict[str, object]:
     return {
-        "status": "draft-ready",
+        "status": "doi-reserved",
+        "doi": "10.5281/zenodo.21357325",
         "title": "Route-Profile Selection Data, Models, and Results for Risk-Budgeted Multi-UAV Assignment",
         "resource_type": "dataset",
-        "publication_date": "2026-07-14",
+        "publication_date": "2026-07-15",
         "creators": [
             {
                 "name": "Xu, Zhouning",

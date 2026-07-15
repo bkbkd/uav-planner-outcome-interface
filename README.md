@@ -139,10 +139,14 @@ src/           environments, planners, learning modules, and assignment utilitie
 
 ## Data and Models
 
-Paper datasets and trained checkpoints are distributed separately because they
-are too large for ordinary Git history. Their persistent archive and checksum
-manifest will be linked here before manuscript submission. The code can
-regenerate all assets from the locked protocol.
+Paper datasets, trained checkpoints, and result files are archived in Zenodo:
+
+> Zhouning Xu, Qiupeng Wu, and Bolin Chen. *Route-Profile Selection Data,
+> Models, and Results for Risk-Budgeted Multi-UAV Assignment*, version 1.0.0.
+> Zenodo, 2026. https://doi.org/10.5281/zenodo.21357325
+
+The archive includes a checksum manifest. The code can also regenerate all
+assets from the locked protocol.
 
 ## License
 
