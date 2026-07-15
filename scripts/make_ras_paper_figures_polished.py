@@ -608,7 +608,7 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     axes[1].set_title("(b) End-to-end dispatch timing")
     axes[1].bar_label(times, labels=[f"{v:.1f}" for v in means], padding=2, fontsize=7.6)
     axes[1].annotate(
-        "same predictions\n+9 ms allocator time",
+        "same prediction workload\n+9 ms assignment time",
         xy=(3, q50.loc["learned_portfolio", "decision_wall_time_sec_mean"]),
         xytext=(2.45, 56),
         ha="center",
@@ -639,7 +639,7 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     axes[0].set_ylim(85, 101)
     axes[0].set_xticks(method_x, labels)
     axes[0].set_ylabel("completed tasks (%)")
-    axes[0].set_title("(a) Mission completion")
+    axes[0].set_title("(a) Task completion")
     for xpos, value, color in zip(method_x, complete_values, colors):
         axes[0].annotate(
             f"{value + 1e-9:.1f}%",
@@ -678,9 +678,9 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     axes[2].set_xlim(lower - margin, upper + margin)
     axes[2].set_ylim(lower - margin, upper + margin)
     axes[2].set_aspect("equal", adjustable="box")
-    axes[2].set_xlabel("mission length with planned candidates (m)")
-    axes[2].set_ylabel("mission length with predicted candidates (m)")
-    axes[2].set_title("(c) Predicted vs planned mission length")
+    axes[2].set_xlabel("planner-outcome system length (m)")
+    axes[2].set_ylabel("predicted-outcome system length (m)")
+    axes[2].set_title("(c) Cumulative route length")
     mard = float(np.mean(np.abs(learned_length - exact_length) / exact_length) * 100.0)
     axes[2].text(
         0.04,
