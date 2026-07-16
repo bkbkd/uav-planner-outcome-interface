@@ -10,7 +10,7 @@ execution.
 
 The repository accompanies the manuscript:
 
-> *A Learned Multi-Profile Planner-Outcome Interface for Risk-Budgeted
+> *A Learned Interface for Multi-Profile Planner Outcomes in Risk-Budgeted
 > Multi-UAV Assignment*
 
 ## What Is Included

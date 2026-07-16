@@ -268,8 +268,8 @@ def public_code_commit() -> str:
 def archive_readme() -> str:
     return """# Learned Multi-Profile Planner-Outcome Interface: Data, Models, and Results
 
-This record accompanies *A Learned Multi-Profile Planner-Outcome Interface for
-Risk-Budgeted Multi-UAV Assignment*.
+This record accompanies *A Learned Interface for Multi-Profile Planner Outcomes
+in Risk-Budgeted Multi-UAV Assignment*.
 
 Persistent identifier: https://doi.org/10.5281/zenodo.21357325
 
