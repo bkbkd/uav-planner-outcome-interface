@@ -164,7 +164,7 @@ def make_commitment_example(
     )
 
     methods = ("global_profile", "portfolio")
-    titles = ("Hindsight best uniform profile", "Per-edge profile selection")
+    titles = ("Best uniform use of planner outcomes", "Full three-profile portfolio")
     fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.55), sharex=True, sharey=True)
     image = None
     for ax, method, title in zip(axes, methods, titles):
@@ -214,7 +214,7 @@ def make_commitment_example(
     axes[0].set_ylabel("y (m)")
     gain = float(example["mixing_gain"])
     fig.suptitle(
-        f"Same dispatch, matching, and exposure budget: mixed profiles save {gain:.2f} m",
+        f"Same dispatch, matching, and exposure budget: the portfolio saves {gain:.2f} m",
         fontsize=10.0,
         fontweight="bold",
         y=0.995,
@@ -321,26 +321,35 @@ def draw_fleet_endpoints(ax: plt.Axes, agents: np.ndarray, tasks: np.ndarray) ->
 
 
 def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
-    exact = pd.read_csv(summary_dir / "exact_commitment_summary.csv")
-    exact = exact[exact["method"] == "global_profile"].sort_values("budget_quantile")
+    rng = np.random.default_rng(20260712)
+    exact_gains = load_lattice_exact_gains(summary_dir)
+    exact_summary = []
+    for budget, subset in exact_gains.groupby("budget_quantile", sort=True):
+        mean, low, high = bootstrap_mean_ci(subset["gain"].to_numpy(float), rng)
+        exact_summary.append((float(budget), mean, low, high))
+    exact_summary = np.asarray(exact_summary, dtype=float)
+
     learned = pd.read_csv(summary_dir / "learned_commitment_paired.csv")
     learned = learned[
         (learned["reference_method"] == "dispatch_global_learned")
         & (learned["scope"] == "common_true_nonviolating")
     ].sort_values("budget_quantile")
-    regimes = pd.read_csv(summary_dir / "operating_regime_instances.csv")
-    regimes = regimes[
-        (regimes["pool"] != "development")
-        & (regimes["budget_quantile"].isin([0.1, 0.5, 0.9]))
-    ]
+    k2_gaps = load_exact_k2_gaps(summary_dir)
 
-    fig, (exact_ax, learned_ax, regime_ax) = plt.subplots(1, 3, figsize=(10.4, 3.25))
-    q = exact["budget_quantile"].to_numpy(float)
-    exact_ax.plot(q, exact["gain_to_k3_mean"], marker="o", color=EXACT_COLOR)
+    fig, (exact_ax, learned_ax, k2_ax) = plt.subplots(1, 3, figsize=(10.4, 3.25))
+    exact_ax.plot(exact_summary[:, 0], exact_summary[:, 1], marker="o", color=EXACT_COLOR)
+    exact_ax.fill_between(
+        exact_summary[:, 0],
+        exact_summary[:, 2],
+        exact_summary[:, 3],
+        color=EXACT_COLOR,
+        alpha=0.14,
+        linewidth=0,
+    )
     exact_ax.axhline(0, color="#475569", linewidth=0.9)
     exact_ax.set_xlabel("budget quantile")
-    exact_ax.set_ylabel("per-edge gain (m)")
-    exact_ax.set_title("(a) Planner-generated outcomes")
+    exact_ax.set_ylabel("route-length gain (m)")
+    exact_ax.set_title("(a) Planner-generated portfolio value")
 
     ql = learned["budget_quantile"].to_numpy(float)
     mean = learned["gain_mean"].to_numpy(float)
@@ -350,63 +359,60 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
     learned_ax.fill_between(ql, lo, hi, color=EDGE_COLOR, alpha=0.15, linewidth=0)
     learned_ax.axhline(0, color="#475569", linewidth=0.9)
     learned_ax.set_xlabel("budget quantile")
-    learned_ax.set_ylabel("per-edge gain (m)")
-    learned_ax.set_title("(b) Predicted outcomes, same predictions")
+    learned_ax.set_ylabel("route-length gain (m)")
+    learned_ax.set_title("(b) Value retained after learned acquisition")
 
-    budgets = np.asarray([0.1, 0.5, 0.9])
-    x = np.arange(len(budgets), dtype=float)
-    regime_specs = (
-        ("low disagreement + low utilization", "low", "low", GLOBAL_COLOR, "o", -0.07),
-        ("high disagreement + high utilization", "high", "high", EDGE_COLOR, "s", 0.07),
+    k2_specs = (
+        ("without safe", "portfolio_fast_balanced", PROFILE_COLORS["safe"], "o"),
+        ("without balanced", "portfolio_fast_safe", PROFILE_COLORS["balanced"], "s"),
+        ("without fast", "portfolio_balanced_safe", PROFILE_COLORS["fast"], "^"),
     )
-    rng = np.random.default_rng(20260712)
-    for label, disagreement, utilization, color, marker, offset in regime_specs:
-        means = []
-        lows = []
-        highs = []
-        counts = []
-        for budget in budgets:
-            values = regimes[
-                np.isclose(regimes["budget_quantile"], budget)
-                & (regimes["assignment_disagreement_bin"] == disagreement)
-                & (regimes["budget_utilization_bin"] == utilization)
-            ]["mixing_gain"].to_numpy(float)
-            if len(values) == 0:
-                raise ValueError(f"No held-out operating-regime samples for q={budget}, {label}")
-            sample_mean, sample_low, sample_high = bootstrap_mean_ci(values, rng)
-            means.append(sample_mean)
-            lows.append(sample_low)
-            highs.append(sample_high)
-            counts.append(len(values))
-        means_array = np.asarray(means)
-        yerr = np.vstack((means_array - np.asarray(lows), np.asarray(highs) - means_array))
-        regime_ax.errorbar(
-            x + offset,
-            means_array,
-            yerr=yerr,
+    budget_labels = {0.1: "tight\n$q=0.1$", 0.5: "medium\n$q=0.5$", 0.9: "loose\n$q=0.9$"}
+    for label, method, color, marker in k2_specs:
+        subset = k2_gaps[k2_gaps["method"] == method].sort_values("budget_quantile")
+        k2_ax.plot(
+            subset["budget_quantile"].map({0.1: 0, 0.5: 1, 0.9: 2}),
+            subset["gap_mean"],
             color=color,
             marker=marker,
-            capsize=2.5,
             label=label,
         )
-        for xpos, value, count in zip(x + offset, means_array, counts):
-            regime_ax.annotate(
-                f"$n={count}$",
-                (xpos, value),
-                xytext=(0, 7),
-                textcoords="offset points",
-                ha="center",
-                fontsize=6.5,
-                color=color,
-            )
-    regime_ax.axhline(0, color="#475569", linewidth=0.9)
-    regime_ax.set_xticks(x, ["tight\n$q=0.1$", "medium\n$q=0.5$", "loose\n$q=0.9$"])
-    regime_ax.set_ylabel("per-edge gain (m)")
-    regime_ax.set_title("(c) When per-edge selection matters")
-    regime_ax.legend(loc="upper right", frameon=False, fontsize=6.5)
+    k2_ax.axhline(0, color="#475569", linewidth=0.9)
+    k2_ax.set_xticks(range(3), list(budget_labels.values()))
+    k2_ax.set_ylabel("gap to full $K=3$ (m)")
+    k2_ax.set_title("(c) Cost of omitting one profile")
+    k2_ax.legend(loc="upper left", frameon=False, fontsize=6.8)
 
     fig.subplots_adjust(left=0.065, right=0.99, bottom=0.2, top=0.9, wspace=0.34)
     save(fig, output_dir, "fig3_commitment_evidence")
+
+
+def load_exact_k2_gaps(summary_dir: Path) -> pd.DataFrame:
+    exact_dir = summary_dir.parent / "exact"
+    methods = ("portfolio_fast_balanced", "portfolio_fast_safe", "portfolio_balanced_safe")
+    rows = []
+    for pool in ("test_1", "test_2", "test_3"):
+        results = pd.read_csv(exact_dir / pool / "budget_assignment_results.csv")
+        selected = results[
+            results["method"].isin(("portfolio", *methods))
+            & results["budget_quantile"].isin((0.1, 0.5, 0.9))
+        ]
+        pivot = selected.pivot(
+            index=["instance_id", "budget_quantile"],
+            columns="method",
+            values="selected_length",
+        )
+        for method in methods:
+            gap = (pivot[method] - pivot["portfolio"]).dropna()
+            frame = gap.rename("gap").reset_index()
+            frame["method"] = method
+            frame["pool"] = pool
+            rows.append(frame)
+    combined = pd.concat(rows, ignore_index=True)
+    return (
+        combined.groupby(["method", "budget_quantile"], as_index=False)
+        .agg(gap_mean=("gap", "mean"), n=("gap", "size"))
+    )
 
 
 def make_operating_regime_appendix(summary_dir: Path, output_dir: Path) -> None:
@@ -500,13 +506,25 @@ def make_portability(
     planner_ax.axhline(0, color="#475569", linewidth=0.9)
     planner_ax.set_xlabel("budget quantile")
     planner_ax.set_ylabel("per-edge gain (m)")
-    planner_ax.set_title("(a) Different planners")
+    planner_ax.set_title("(a) Reference value with two planners")
     planner_ax.legend(frameon=False, loc="upper right")
 
     scale_frames = {
-        "5$\\times$5\n75 outcomes\n$n=1{,}500$": scale_gain_frame(lattice, 5, {0.1: "tight", 0.5: "medium", 0.9: "loose"}),
-        "10$\\times$10\n300 outcomes\n$n=150$": scale_gain_frame(load_scale_exact_gains(scale_10_dir), 10, {0.25: "tight", 0.5: "medium", 0.75: "loose"}),
-        "20$\\times$20\n1,200 outcomes\n$n=30$": scale_gain_frame(load_scale_exact_gains(scale_20_dir), 20, {0.25: "tight", 0.5: "medium", 0.75: "loose"}),
+        "$5\\times5$\n$N=1{,}500$": scale_gain_frame(
+            load_lattice_learned_gains(commitment_summary_dir),
+            5,
+            {0.1: "tight", 0.5: "medium", 0.9: "loose"},
+        ),
+        "$10\\times10$\n$N=150$": scale_gain_frame(
+            load_scale_learned_gains(scale_10_dir),
+            10,
+            {0.25: "tight", 0.5: "medium", 0.75: "loose"},
+        ),
+        "$20\\times20$\n$N=30$": scale_gain_frame(
+            load_scale_learned_gains(scale_20_dir),
+            20,
+            {0.25: "tight", 0.5: "medium", 0.75: "loose"},
+        ),
     }
     scale_x = np.arange(len(scale_frames), dtype=float)
     level_specs = (
@@ -538,7 +556,7 @@ def make_portability(
     scale_ax.axhline(0, color="#475569", linewidth=0.9)
     scale_ax.set_xticks(scale_x, list(scale_frames))
     scale_ax.set_ylabel("gain per selected route (m)")
-    scale_ax.set_title("(b) Larger assignments")
+    scale_ax.set_title("(b) Predictor reused without retraining")
     scale_ax.legend(frameon=False, ncol=3, loc="upper right")
 
     fig.subplots_adjust(left=0.075, right=0.99, bottom=0.25, top=0.9, wspace=0.28)
@@ -574,6 +592,59 @@ def load_scale_exact_gains(evaluation_dir: Path) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)
 
 
+def load_lattice_learned_gains(summary_dir: Path) -> pd.DataFrame:
+    rows = []
+    learned_dir = summary_dir.parent / "learned_q75"
+    for pool in ("test_1", "test_2", "test_3"):
+        results = pd.read_csv(learned_dir / pool / "learned_budget_assignment_results.csv")
+        selected = results[results["method"].isin(("learned_portfolio", "dispatch_global_learned"))]
+        edge = selected[selected["method"] == "learned_portfolio"].copy()
+        global_rule = selected[selected["method"] == "dispatch_global_learned"].copy()
+        paired = edge.merge(
+            global_rule,
+            on=["instance_id", "budget_quantile"],
+            suffixes=("_edge", "_global"),
+        )
+        common = paired[
+            paired["predicted_feasible_edge"].eq(1)
+            & paired["predicted_feasible_global"].eq(1)
+            & paired["true_risk_violation_edge"].eq(0)
+            & paired["true_risk_violation_global"].eq(0)
+        ].copy()
+        common["gain"] = common["selected_true_length_global"] - common["selected_true_length_edge"]
+        common["pool"] = pool
+        rows.append(common[["instance_id", "budget_quantile", "gain", "pool"]])
+    return pd.concat(rows, ignore_index=True)
+
+
+def load_scale_learned_gains(evaluation_dir: Path) -> pd.DataFrame:
+    rows = []
+    for pool in ("test_1", "test_2", "test_3"):
+        results = pd.read_csv(evaluation_dir / pool / "scale_assignment_results.csv")
+        selected = results[
+            (results["consumer"] == "sum_length")
+            & (results["acquisition"] == "learned")
+            & (results["commitment"].isin(("edge_wise", "dispatch_global")))
+        ]
+        edge = selected[selected["commitment"] == "edge_wise"].copy()
+        global_rule = selected[selected["commitment"] == "dispatch_global"].copy()
+        paired = edge.merge(
+            global_rule,
+            on=["instance_id", "budget_level"],
+            suffixes=("_edge", "_global"),
+        )
+        common = paired[
+            paired["predicted_feasible_edge"].eq(1)
+            & paired["predicted_feasible_global"].eq(1)
+            & paired["true_violation_edge"].eq(0)
+            & paired["true_violation_global"].eq(0)
+        ].copy()
+        common["gain"] = common["true_sum_length_global"] - common["true_sum_length_edge"]
+        common["pool"] = pool
+        rows.append(common[["instance_id", "budget_level", "gain", "pool"]])
+    return pd.concat(rows, ignore_index=True)
+
+
 def scale_gain_frame(gains: pd.DataFrame, selected_routes: int, levels: dict[float, str]) -> pd.DataFrame:
     budget_column = "budget_quantile" if "budget_quantile" in gains.columns else "budget_level"
     selected = gains[gains[budget_column].isin(levels)].copy()
@@ -585,38 +656,71 @@ def scale_gain_frame(gains: pd.DataFrame, selected_routes: int, levels: dict[flo
 def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     summary = pd.read_csv(static_runtime_dir / "static_runtime_serial_summary.csv")
     q50 = summary[np.isclose(summary["budget_quantile"], 0.5)].set_index("method")
-    methods = ["exact_portfolio", "fast_only", "dispatch_global", "learned_portfolio"]
-    labels = ["plan all\ncandidates", "fixed\nfast", "predict,\none profile", "predict,\nper edge"]
-    colors = [EXACT_COLOR, PROFILE_COLORS["fast"], GLOBAL_COLOR, EDGE_COLOR]
-    ordered = q50.loc[methods]
+    raw = pd.read_csv(static_runtime_dir / "static_runtime_serial_results.csv")
+    raw = raw[np.isclose(raw["budget_quantile"], 0.5)]
+    k1 = (
+        raw[raw["method"].isin(("fast_only", "balanced_only", "safe_only"))]
+        .groupby(["pool", "instance_id"], as_index=False)["prediction_runtime_sec"]
+        .mean()
+    )["prediction_runtime_sec"].to_numpy(float) * 1000.0
+    k3 = raw[raw["method"] == "learned_portfolio"]["prediction_runtime_sec"].to_numpy(float) * 1000.0
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.8, 3.35))
-    calls = axes[0].bar(labels, ordered["total_planner_calls_mean"], color=colors, width=0.68)
-    axes[0].set_ylabel("measured planner calls")
-    axes[0].set_title("(a) Planner calls")
-    axes[0].bar_label(calls, labels=[f"{v:.1f}" for v in ordered["total_planner_calls_mean"]], padding=2, fontsize=7.6)
-
-    means = ordered["decision_wall_time_sec_mean"].to_numpy(float)
-    yerr = np.vstack(
-        [
-            means - ordered["decision_wall_time_sec_q25"].to_numpy(float),
-            ordered["decision_wall_time_sec_q75"].to_numpy(float) - means,
-        ]
+    fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.25))
+    prediction_values = np.asarray([np.mean(k1), np.mean(k3)])
+    prediction_yerr = np.vstack(
+        (
+            prediction_values - np.asarray([np.quantile(k1, 0.25), np.quantile(k3, 0.25)]),
+            np.asarray([np.quantile(k1, 0.75), np.quantile(k3, 0.75)]) - prediction_values,
+        )
     )
-    times = axes[1].bar(labels, means, color=colors, width=0.68, yerr=yerr, capsize=3)
-    axes[1].set_ylabel("decision wall time (s)")
-    axes[1].set_title("(b) End-to-end dispatch timing")
-    axes[1].bar_label(times, labels=[f"{v:.1f}" for v in means], padding=2, fontsize=7.6)
-    axes[1].annotate(
-        "same prediction workload\n+9 ms assignment time",
-        xy=(3, q50.loc["learned_portfolio", "decision_wall_time_sec_mean"]),
-        xytext=(2.45, 56),
+    prediction_bars = axes[0].bar(
+        ["one profile", "three profiles"],
+        prediction_values,
+        color=[GLOBAL_COLOR, EDGE_COLOR],
+        width=0.64,
+        yerr=prediction_yerr,
+        capsize=3,
+    )
+    axes[0].set_ylabel("prediction time (ms)")
+    axes[0].set_title("(a) Candidate prediction")
+    axes[0].set_ylim(0, 240)
+    axes[0].bar_label(prediction_bars, labels=[f"{value:.0f}" for value in prediction_values], padding=2, fontsize=7.5)
+    axes[0].text(
+        0.5,
+        0.95,
+        f"+{prediction_values[1] - prediction_values[0]:.0f} ms for\ntwo more outcomes",
+        transform=axes[0].transAxes,
         ha="center",
-        fontsize=7.4,
+        va="top",
         color=EDGE_COLOR,
-        arrowprops={"arrowstyle": "->", "color": EDGE_COLOR, "linewidth": 0.9},
+        fontsize=7.2,
     )
-    fig.tight_layout()
+
+    system_methods = ["exact_portfolio", "learned_portfolio"]
+    system_labels = ["planner-generated\n$K=3$", "learned\n$K=3$"]
+    system_colors = [EXACT_COLOR, EDGE_COLOR]
+    system = q50.loc[system_methods]
+    wall_means = system["decision_wall_time_sec_mean"].to_numpy(float)
+    wall_yerr = np.vstack(
+        (
+            wall_means - system["decision_wall_time_sec_q25"].to_numpy(float),
+            system["decision_wall_time_sec_q75"].to_numpy(float) - wall_means,
+        )
+    )
+    wall_bars = axes[1].bar(system_labels, wall_means, color=system_colors, width=0.64, yerr=wall_yerr, capsize=3)
+    axes[1].set_ylabel("decision wall time (s)")
+    axes[1].set_title("(b) Complete dispatch rebuild")
+    axes[1].bar_label(wall_bars, labels=[f"{value:.1f}" for value in wall_means], padding=2, fontsize=7.5)
+    axes[1].text(0.58, 0.72, "14.43$\\times$ faster", transform=axes[1].transAxes, color=EDGE_COLOR, fontsize=7.5)
+
+    call_values = system["total_planner_calls_mean"].to_numpy(float)
+    call_bars = axes[2].bar(system_labels, call_values, color=system_colors, width=0.64)
+    axes[2].set_ylabel("measured planner calls")
+    axes[2].set_title("(c) Planner workload")
+    axes[2].bar_label(call_bars, labels=[f"{value:.1f}" for value in call_values], padding=2, fontsize=7.5)
+    axes[2].text(0.52, 0.74, "90.5% fewer calls", transform=axes[2].transAxes, color=EDGE_COLOR, fontsize=7.5)
+
+    fig.subplots_adjust(left=0.065, right=0.99, bottom=0.19, top=0.88, wspace=0.34)
     save(fig, output_dir, "fig5_acquisition_economics")
 
 
@@ -628,7 +732,7 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     ).query("method == 'learned_portfolio'")
     missions = pd.concat([exact_missions, learned_missions], ignore_index=True)
     order = ["exact_portfolio", "learned_portfolio", "fast_only"]
-    labels = ["plan all\ncandidates", "predict,\nper edge", "fixed\nfast"]
+    labels = ["planner-generated\n$K=3$", "learned\n$K=3$", "learned\nfixed fast"]
     colors = [EXACT_COLOR, EDGE_COLOR, PROFILE_COLORS["fast"]]
     rows = population.loc[order]
 
@@ -678,8 +782,8 @@ def make_rolling_stress(rolling_dir: Path, exact_dir: Path, output_dir: Path) ->
     axes[2].set_xlim(lower - margin, upper + margin)
     axes[2].set_ylim(lower - margin, upper + margin)
     axes[2].set_aspect("equal", adjustable="box")
-    axes[2].set_xlabel("planner-outcome system length (m)")
-    axes[2].set_ylabel("predicted-outcome system length (m)")
+    axes[2].set_xlabel("planner-generated $K=3$ length (m)")
+    axes[2].set_ylabel("learned $K=3$ length (m)")
     axes[2].set_title("(c) Cumulative route length")
     mard = float(np.mean(np.abs(learned_length - exact_length) / exact_length) * 100.0)
     axes[2].text(

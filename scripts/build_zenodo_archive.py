@@ -266,10 +266,10 @@ def public_code_commit() -> str:
 
 
 def archive_readme() -> str:
-    return """# Route-Profile Selection Data, Models, and Results
+    return """# Learned Multi-Profile Planner-Outcome Interface: Data, Models, and Results
 
-This record accompanies *Delaying Route-Profile Selection in Risk-Budgeted
-Multi-UAV Assignment with a Learned Planner Interface*.
+This record accompanies *A Learned Multi-Profile Planner-Outcome Interface for
+Risk-Budgeted Multi-UAV Assignment*.
 
 Persistent identifier: https://doi.org/10.5281/zenodo.21357325
 
@@ -319,7 +319,7 @@ def zenodo_metadata_draft() -> dict[str, object]:
     return {
         "status": "doi-reserved",
         "doi": "10.5281/zenodo.21357325",
-        "title": "Route-Profile Selection Data, Models, and Results for Risk-Budgeted Multi-UAV Assignment",
+        "title": "Learned Multi-Profile Planner-Outcome Interface: Data, Models, and Results for Risk-Budgeted Multi-UAV Assignment",
         "resource_type": "dataset",
         "publication_date": "2026-07-15",
         "creators": [
@@ -338,16 +338,17 @@ def zenodo_metadata_draft() -> dict[str, object]:
         ],
         "description": (
             "Map-disjoint planner supervision, fleet assignment benchmarks, trained models, "
-            "and final results accompanying a study of when route profiles should be selected "
-            "in risk-budgeted multi-UAV assignment."
+            "and final results for a learned interface that supplies multiple profile-conditioned "
+            "planner outcomes to risk-budgeted multi-UAV allocation."
         ),
         "license": "cc-by-4.0",
         "keywords": [
             "multi-robot task allocation",
             "multi-UAV assignment",
             "risk-aware planning",
-            "route-profile selection",
-            "learned planner interface",
+            "planner outcome portfolio",
+            "learned route cost",
+            "profile-conditioned prediction",
         ],
         "related_identifiers": [
             {

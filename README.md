@@ -1,17 +1,17 @@
-# Route-Profile Selection for Risk-Budgeted Multi-UAV Assignment
+# Learned Multi-Profile Planner Outcomes for Risk-Budgeted Multi-UAV Assignment
 
-This repository contains the experiments for studying when a multi-UAV system
-should choose among planner-generated route profiles. A frozen route planner
-supplies route length and additive exposure under several profiles. The
-experiments compare a profile fixed during development, one profile selected
-for each dispatch, and profiles selected per edge during allocation. A shared
-predictor avoids planning every candidate under every profile, while the
-planner still generates all routes selected for execution.
+This repository implements a learned multi-profile planner-outcome interface
+for risk-budgeted multi-UAV assignment. A shared predictor supplies route
+length and additive exposure for three planner profiles, avoiding candidate
+planning under every profile. Controlled allocation experiments test whether
+the predicted portfolio retains the value of planner-generated alternatives,
+while the reference planner still generates every route selected for
+execution.
 
 The repository accompanies the manuscript:
 
-> *Delaying Route-Profile Selection in Risk-Budgeted Multi-UAV Assignment with
-> a Learned Planner Interface*
+> *A Learned Multi-Profile Planner-Outcome Interface for Risk-Budgeted
+> Multi-UAV Assignment*
 
 ## What Is Included
 
@@ -19,7 +19,8 @@ The repository accompanies the manuscript:
 - a structurally distinct grid risk planner used to repeat the profile-selection comparison;
 - generation of map-disjoint edge datasets and fleet assignment benchmarks;
 - shared and profile-specific route-outcome predictors;
-- fixed, dispatch-wide, and per-edge profile selection;
+- one-, two-, and three-profile portfolio comparisons;
+- uniform and per-edge consumers for controlled downstream evaluation;
 - exact finite evaluation for 5x5 assignment and MILP evaluation for 10x10 and 20x20;
 - static runtime accounting, rolling dispatch, statistical summaries, and figures.
 
@@ -126,7 +127,7 @@ For assignment benchmarks, the near-edge policy is:
 
 Exposure is additive along a route. The associated survival proxy is
 `survival = exp(-exposure)`, so selected route exposures can be composed by the
-profile-selection rules evaluated in the paper.
+portfolio consumers evaluated in the paper.
 
 ## Repository Layout
 
@@ -141,8 +142,9 @@ src/           environments, planners, learning modules, and assignment utilitie
 
 Paper datasets, trained checkpoints, and result files are archived in Zenodo:
 
-> Zhouning Xu, Qiupeng Wu, and Bolin Chen. *Route-Profile Selection Data,
-> Models, and Results for Risk-Budgeted Multi-UAV Assignment*, version 1.0.0.
+> Zhouning Xu, Qiupeng Wu, and Bolin Chen. *Learned Multi-Profile
+> Planner-Outcome Interface: Data, Models, and Results for Risk-Budgeted
+> Multi-UAV Assignment*, version 1.0.0.
 > Zenodo, 2026. https://doi.org/10.5281/zenodo.21357325
 
 The archive includes a checksum manifest. The code can also regenerate all
