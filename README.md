@@ -144,7 +144,7 @@ Paper datasets, trained checkpoints, and result files are archived in Zenodo:
 
 > Zhouning Xu, Qiupeng Wu, and Bolin Chen. *Learned Multi-Profile
 > Planner-Outcome Interface: Data, Models, and Results for Risk-Budgeted
-> Multi-UAV Assignment*, version 1.0.0.
+> Multi-UAV Assignment*, version 1.0.1.
 > Zenodo, 2026. https://doi.org/10.5281/zenodo.21357325
 
 The archive includes a checksum manifest. The code can also regenerate all
