@@ -230,7 +230,7 @@ def make_commitment_example(
         colorbar_axis = fig.add_axes([0.92, 0.18, 0.014, 0.62])
         colorbar_axis.grid(False)
         colorbar = fig.colorbar(image, cax=colorbar_axis)
-        colorbar.set_label("threat exposure rate")
+        colorbar.set_label("threat exposure rate (s$^{-1}$)")
     fig.subplots_adjust(left=0.065, right=0.91, bottom=0.13, top=0.89, wspace=0.08)
     save(fig, output_dir, "fig2_commitment_example")
 
@@ -360,7 +360,7 @@ def make_commitment_evidence(summary_dir: Path, output_dir: Path) -> None:
     learned_ax.axhline(0, color="#475569", linewidth=0.9)
     learned_ax.set_xlabel("budget quantile")
     learned_ax.set_ylabel("route-length gain (m)")
-    learned_ax.set_title("(b) Value retained after learned acquisition")
+    learned_ax.set_title("(b) Decision value under learned acquisition")
 
     k2_specs = (
         ("without safe", "portfolio_fast_balanced", PROFILE_COLORS["safe"], "o"),
@@ -505,7 +505,7 @@ def make_portability(
     )
     planner_ax.axhline(0, color="#475569", linewidth=0.9)
     planner_ax.set_xlabel("budget quantile")
-    planner_ax.set_ylabel("per-edge gain (m)")
+    planner_ax.set_ylabel("route-length gain (m)")
     planner_ax.set_title("(a) Reference value with two planners")
     planner_ax.legend(frameon=False, loc="upper right")
 
@@ -682,7 +682,7 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
         capsize=3,
     )
     axes[0].set_ylabel("prediction time (ms)")
-    axes[0].set_title("(a) Candidate prediction")
+    axes[0].set_title("(a) Marginal prediction workload")
     axes[0].set_ylim(0, 240)
     axes[0].bar_label(prediction_bars, labels=[f"{value:.0f}" for value in prediction_values], padding=2, fontsize=7.5)
     axes[0].text(
@@ -697,7 +697,7 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     )
 
     system_methods = ["exact_portfolio", "learned_portfolio"]
-    system_labels = ["planner-generated\n$K=3$", "learned\n$K=3$"]
+    system_labels = ["direct planner\nacquisition", "learned\n$K=3$"]
     system_colors = [EXACT_COLOR, EDGE_COLOR]
     system = q50.loc[system_methods]
     wall_means = system["decision_wall_time_sec_mean"].to_numpy(float)
@@ -709,16 +709,14 @@ def make_runtime_accounting(static_runtime_dir: Path, output_dir: Path) -> None:
     )
     wall_bars = axes[1].bar(system_labels, wall_means, color=system_colors, width=0.64, yerr=wall_yerr, capsize=3)
     axes[1].set_ylabel("decision wall time (s)")
-    axes[1].set_title("(b) Complete dispatch rebuild")
+    axes[1].set_title("(b) Serial wall-time comparison")
     axes[1].bar_label(wall_bars, labels=[f"{value:.1f}" for value in wall_means], padding=2, fontsize=7.5)
-    axes[1].text(0.58, 0.72, "14.43$\\times$ faster", transform=axes[1].transAxes, color=EDGE_COLOR, fontsize=7.5)
 
     call_values = system["total_planner_calls_mean"].to_numpy(float)
     call_bars = axes[2].bar(system_labels, call_values, color=system_colors, width=0.64)
     axes[2].set_ylabel("measured planner calls")
-    axes[2].set_title("(c) Planner workload")
+    axes[2].set_title("(c) Planner-call accounting")
     axes[2].bar_label(call_bars, labels=[f"{value:.1f}" for value in call_values], padding=2, fontsize=7.5)
-    axes[2].text(0.52, 0.74, "90.5% fewer calls", transform=axes[2].transAxes, color=EDGE_COLOR, fontsize=7.5)
 
     fig.subplots_adjust(left=0.065, right=0.99, bottom=0.19, top=0.88, wspace=0.34)
     save(fig, output_dir, "fig5_acquisition_economics")
